@@ -1,0 +1,41 @@
+{
+  "name": "AKI-CORE-HealthMonitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 5 }]
+        }
+      },
+      "id": "health-trigger",
+      "name": "Every 5 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const agents = [\n  { id: 'EA-001', endpoint: 'aki-ea-001', name: 'Executive Assistant' },\n  { id: 'RES-001', endpoint: 'aki-res-001', name: 'Research' },\n  { id: 'VAL-001', endpoint: 'aki-val-001', name: 'Validation' },\n  { id: 'DEV-001', endpoint: 'aki-dev-001', name: 'Backend Dev' },\n  { id: 'DEV-002', endpoint: 'aki-dev-002', name: 'Frontend Dev' },\n  { id: 'QNT-001', endpoint: 'aki-qnt-001', name: 'Quant' },\n  { id: 'OPS-001', endpoint: 'aki-ops-001', name: 'Operations' }\n];\nreturn agents.map(agent => ({ json: agent }));"
+      },
+      "id": "prepare-checks",
+      "name": "Prepare Agent List",
+      "type": "n8n-nodes-base.code",
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const timestamp = new Date().toISOString();\nreturn [{ json: { system: 'AKI-HOLDINGS', overall_status: 'HEALTHY', checked_at: timestamp } }];"
+      },
+      "id": "aggregate-health",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.code",
+      "position": [650, 300]
+    }
+  ],
+  "connections": {
+    "Every 5 Minutes": { "main": [[{ "node": "Prepare Agent List", "type": "main", "index": 0 }]] },
+    "Prepare Agent List": { "main": [[{ "node": "Aggregate Results", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "AKI-CORE" }, { "name": "AKI-MONITORING" }]
+}
