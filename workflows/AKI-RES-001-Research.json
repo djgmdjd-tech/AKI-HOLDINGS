@@ -1,0 +1,68 @@
+{
+    "name": "AKI-RES-001-ResearchDepartment",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-res-001",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "res-webhook",
+                  "name": "RES-001 Receiver",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-res-001"
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "https://api.anthropic.com/v1/messages",
+                            "sendHeaders": true,
+                    "headerParameters": {
+                                "parameters": [
+                                              { "name": "x-api-key", "value": "={{ $vars.ANTHROPIC_API_KEY }}" },
+                                              { "name": "anthropic-version", "value": "2023-06-01" },
+                                              { "name": "content-type", "value": "application/json" }
+                                ]
+                    },
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 2048,\n  \"system\": \"You are RES-001, the Research Department Manager for AKI Holdings. Your role: 1) Analyze market data and trends 2) Monitor news and social signals 3) Generate research reports 4) Spawn specialist agents for specific research tasks. Always provide data-driven insights. Respond in Korean.\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.body.task || $json.event.task || 'Provide market overview' }}\"\n    }\n  ]\n}",
+                            "options": {}
+                  },
+                  "id": "res-claude",
+                  "name": "Research Brain",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const response = $input.first().json;\nconst content = response.content?.[0]?.text || 'No research data';\n\nreturn [{\n  json: {\n    agent: 'RES-001',\n    department: 'Research',\n    status: 'completed',\n    research: content,\n    model: response.model,\n    tokens_used: response.usage?.input_tokens + response.usage?.output_tokens,\n    timestamp: new Date().toISOString()\n  }\n}];"
+                  },
+                  "id": "res-format",
+                  "name": "Format Research",
+                  "type": "n8n-nodes-base.code",
+                  "position": [650, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "res-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [850, 300]
+          }
+    ],
+    "connections": {
+          "RES-001 Receiver": { "main": [[{ "node": "Research Brain", "type": "main", "index": 0 }]] },
+          "Research Brain": { "main": [[{ "node": "Format Research", "type": "main", "index": 0 }]] },
+          "Format Research": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-RESEARCH" }]
+}
