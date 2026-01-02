@@ -1,0 +1,139 @@
+{
+    "name": "AKI-CORE-001-EventBus",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-event-bus",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "webhook-receiver",
+                  "name": "Event Receiver",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-event-bus"
+          },
+          {
+                  "parameters": {
+                            "rules": {
+                                        "rules": [
+                                                      {
+                                                                      "conditions": {
+                                                                                        "options": { "caseSensitive": true },
+                                                                                        "conditions": [
+                                                                                                            { "leftValue": "={{ $json.target }}", "rightValue": "EA-001", "operator": { "type": "string", "operation": "equals" } }
+                                                                                          ]
+                                                                      },
+                                                                      "renameOutput": true,
+                                                                      "outputKey": "EA-001"
+                                                      },
+                                                      {
+                                                                      "conditions": {
+                                                                                        "options": { "caseSensitive": true },
+                                                                                        "conditions": [
+                                                                                                            { "leftValue": "={{ $json.target }}", "rightValue": "RES-001", "operator": { "type": "string", "operation": "equals" } }
+                                                                                        ]
+                                                                      },
+                                                                      "renameOutput": true,
+                                                                      "outputKey": "RES-001"
+                                                      },
+                                                      {
+                                                                      "conditions": {
+                                                                                        "options": { "caseSensitive": true },
+                                                                                        "conditions": [
+                                                                                                            { "leftValue": "={{ $json.target }}", "rightValue": "VAL-001", "operator": { "type": "string", "operation": "equals" } }
+                                                                                          ]
+                                                                      },
+                                                                      "renameOutput": true,
+                                                                      "outputKey": "VAL-001"
+                                                      }
+                                        ]
+                            },
+                            "options": {}
+                  },
+                  "id": "router",
+                  "name": "Route by Target",
+                  "type": "n8n-nodes-base.switch",
+                  "position": [450, 300]
+                                                                      },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-ea-001",
+                            "sendBody": true,
+                            "bodyParameters": {
+                                        "parameters": [
+                                                      { "name": "event", "value": "={{ $json }}" }
+                                        ]
+                            },
+                            "options": {}
+                  },
+                  "id": "call-ea",
+                  "name": "Call EA-001",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [650, 200]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-res-001",
+                            "sendBody": true,
+                            "bodyParameters": {
+                                        "parameters": [
+                                                      { "name": "event", "value": "={{ $json }}" }
+                                        ]
+                            },
+                            "options": {}
+                  },
+                  "id": "call-res",
+                  "name": "Call RES-001",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [650, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-val-001",
+                            "sendBody": true,
+                            "bodyParameters": {
+                                        "parameters": [
+                                                      { "name": "event", "value": "={{ $json }}" }
+                                        ]
+                            },
+                            "options": {}
+                  },
+                  "id": "call-val",
+                  "name": "Call VAL-001",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [650, 400]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={ \"status\": \"routed\", \"target\": \"{{ $json.target }}\", \"timestamp\": \"{{ $now.toISO() }}\" }",
+                    "options": {}
+          },
+            "id": "respond",
+            "name": "Respond",
+                          "type": "n8n-nodes-base.respondToWebhook",
+            "position": [850, 300]
+      }
+],
+    "connections": {
+          "Event Receiver": { "main": [[{ "node": "Route by Target", "type": "main", "index": 0 }]] },
+          "Route by Target": {
+                  "main": [
+                            [{ "node": "Call EA-001", "type": "main", "index": 0 }],
+                            [{ "node": "Call RES-001", "type": "main", "index": 0 }],
+                            [{ "node": "Call VAL-001", "type": "main", "index": 0 }]
+                  ]
+          },
+          "Call EA-001": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] },
+          "Call RES-001": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] },
+          "Call VAL-001": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-CORE" }]
+}
