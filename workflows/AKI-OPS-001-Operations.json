@@ -1,0 +1,68 @@
+{
+    "name": "AKI-OPS-001-TradingOperations",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-ops-001",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "ops-webhook",
+                  "name": "OPS-001 Receiver",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-ops-001"
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "https://api.anthropic.com/v1/messages",
+                            "sendHeaders": true,
+                            "headerParameters": {
+                                        "parameters": [
+                                                      { "name": "x-api-key", "value": "={{ $vars.ANTHROPIC_API_KEY }}" },
+                                                      { "name": "anthropic-version", "value": "2023-06-01" },
+                                                      { "name": "content-type", "value": "application/json" }
+                                        ]
+                            },
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 2048,\n  \"system\": \"You are OPS-001, the Trading Operations Manager for AKI Holdings. Your role: 24/7 trade execution, position monitoring, emergency response, portfolio rebalancing, transaction logging. Provide real-time operational status. Respond in Korean.\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.body.operation || $json.event.operation || 'Provide operations status' }}\"\n    }\n  ]\n}",
+                            "options": {}
+                  },
+                  "id": "ops-claude",
+                  "name": "Operations Brain",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const response = $input.first().json;\nconst content = response.content?.[0]?.text || 'No operations data';\nconst hasAlert = content.includes('ALERT') || content.includes('WARNING');\nreturn [{ json: { agent: 'OPS-001', department: 'Trading Operations', status: 'completed', priority: hasAlert ? 'HIGH' : 'NORMAL', has_alert: hasAlert, report: content, model: response.model, tokens_used: response.usage?.input_tokens + response.usage?.output_tokens, timestamp: new Date().toISOString() } }];"
+                  },
+                  "id": "ops-format",
+                  "name": "Format Report",
+                  "type": "n8n-nodes-base.code",
+                  "position": [650, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "ops-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+            "position": [850, 300]
+          }
+    ],
+    "connections": {
+          "OPS-001 Receiver": { "main": [[{ "node": "Operations Brain", "type": "main", "index": 0 }]] },
+          "Operations Brain": { "main": [[{ "node": "Format Report", "type": "main", "index": 0 }]] },
+          "Format Report": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-OPERATIONS" }]
+}
