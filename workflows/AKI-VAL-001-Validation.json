@@ -1,0 +1,68 @@
+{
+    "name": "AKI-VAL-001-ValidationDepartment",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-val-001",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "val-webhook",
+                  "name": "VAL-001 Receiver",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-val-001"
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "https://api.anthropic.com/v1/messages",
+                            "sendHeaders": true,
+                            "headerParameters": {
+                                        "parameters": [
+                                                      { "name": "x-api-key", "value": "={{ $vars.ANTHROPIC_API_KEY }}" },
+                                                      { "name": "anthropic-version", "value": "2023-06-01" },
+                                                      { "name": "content-type", "value": "application/json" }
+                                        ]
+                            },
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 2048,\n  \"system\": \"You are VAL-001, the Validation Department Manager for AKI Holdings. Your role: 1) Risk assessment (0-100 score) 2) Logic verification 3) ROI calculation 4) Security audit 5) Compliance check. Always provide structured validation results with APPROVED/REJECTED/NEEDS_REVIEW status. Respond in Korean.\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.body.validate || $json.event.validate || 'Validate this request' }}\"\n    }\n  ]\n}",
+                            "options": {}
+                  },
+                  "id": "val-claude",
+                  "name": "Validation Brain",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const response = $input.first().json;\nconst content = response.content?.[0]?.text || 'Validation failed';\nlet status = 'NEEDS_REVIEW';\nif (content.includes('APPROVED')) status = 'APPROVED';\nif (content.includes('REJECTED')) status = 'REJECTED';\nreturn [{ json: { agent: 'VAL-001', department: 'Validation', validation_status: status, analysis: content, model: response.model, tokens_used: response.usage?.input_tokens + response.usage?.output_tokens, timestamp: new Date().toISOString() } }];"
+                  },
+                  "id": "val-format",
+                  "name": "Format Validation",
+                  "type": "n8n-nodes-base.code",
+                  "position": [650, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "val-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [850, 300]
+          }
+    ],
+    "connections": {
+          "VAL-001 Receiver": { "main": [[{ "node": "Validation Brain", "type": "main", "index": 0 }]] },
+          "Validation Brain": { "main": [[{ "node": "Format Validation", "type": "main", "index": 0 }]] },
+          "Format Validation": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-VALIDATION" }]
+}
