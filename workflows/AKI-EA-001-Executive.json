@@ -1,0 +1,68 @@
+{
+    "name": "AKI-EA-001-ExecutiveAssistant",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-ea-001",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "ea-webhook",
+                  "name": "EA-001 Receiver",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-ea-001"
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "https://api.anthropic.com/v1/messages",
+                            "sendHeaders": true,
+                            "headerParameters": {
+                                        "parameters": [
+                                                      { "name": "x-api-key", "value": "={{ $vars.ANTHROPIC_API_KEY }}" },
+                        { "name": "anthropic-version", "value": "2023-06-01" },
+                                                      { "name": "content-type", "value": "application/json" }
+                                        ]
+                  },
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 1024,\n  \"system\": \"You are EA-001, the Executive Assistant AI for AKI Holdings. You coordinate tasks between departments: RES-001 (Research), VAL-001 (Validation), DEV-001 (Backend), DEV-002 (Frontend), QNT-001 (Quant), OPS-001 (Operations). Respond in Korean. Be concise and action-oriented.\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.body.message || $json.event.message || 'Status report requested' }}\"\n    }\n  ]\n}",
+                                      "options": {}
+                  },
+                  "id": "claude-brain",
+                  "name": "Claude Brain",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const response = $input.first().json;\nconst content = response.content?.[0]?.text || 'No response';\n\nreturn [{\n  json: {\n    agent: 'EA-001',\n    status: 'completed',\n    response: content,\n    model: response.model,\n    usage: response.usage,\n    timestamp: new Date().toISOString()\n  }\n}];"
+                  },
+                  "id": "format-response",
+                  "name": "Format Response",
+                  "type": "n8n-nodes-base.code",
+                  "position": [650, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "ea-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [850, 300]
+          }
+    ],
+    "connections": {
+          "EA-001 Receiver": { "main": [[{ "node": "Claude Brain", "type": "main", "index": 0 }]] },
+          "Claude Brain": { "main": [[{ "node": "Format Response", "type": "main", "index": 0 }]] },
+          "Format Response": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-EXECUTIVE" }]
+}
