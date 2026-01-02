@@ -1,0 +1,45 @@
+{
+    "name": "AKI-CORE-ErrorHandler",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-error-handler",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "error-webhook",
+                  "name": "Error Receiver",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-error-handler"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const error = $input.first().json;\nconst timestamp = new Date().toISOString();\nlet severity = 'LOW';\nconst errorMsg = JSON.stringify(error).toLowerCase();\nif (errorMsg.includes('timeout') || errorMsg.includes('rate limit')) severity = 'MEDIUM';\nif (errorMsg.includes('auth') || errorMsg.includes('api key')) severity = 'HIGH';\nif (errorMsg.includes('system') || errorMsg.includes('crash')) severity = 'CRITICAL';\nreturn [{ json: { error_id: 'ERR-' + Date.now(), severity: severity, source_agent: error.body?.agent || 'unknown', message: error.body?.message || JSON.stringify(error), should_alert_ceo: severity === 'HIGH' || severity === 'CRITICAL', timestamp: timestamp } }];"
+                  },
+                  "id": "classify-error",
+                  "name": "Classify Error",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "error-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Error Receiver": { "main": [[{ "node": "Classify Error", "type": "main", "index": 0 }]] },
+          "Classify Error": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-CORE" }, { "name": "AKI-ERROR" }]
+}
