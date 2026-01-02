@@ -1,0 +1,68 @@
+{
+    "name": "AKI-DEV-002-FrontendDevelopment",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-dev-002",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "dev2-webhook",
+                  "name": "DEV-002 Receiver",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-dev-002"
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "https://api.anthropic.com/v1/messages",
+                            "sendHeaders": true,
+                            "headerParameters": {
+                                        "parameters": [
+                                                      { "name": "x-api-key", "value": "={{ $vars.ANTHROPIC_API_KEY }}" },
+                                                      { "name": "anthropic-version", "value": "2023-06-01" },
+                                                      { "name": "content-type", "value": "application/json" }
+                                        ]
+                            },
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 4096,\n  \"system\": \"You are DEV-002, the Frontend Development Manager for AKI Holdings. Your expertise: React, TypeScript, TailwindCSS, Chart.js, responsive design. Provide clean, typed React components. Respond in Korean with code blocks.\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.body.task || $json.event.task || 'Provide frontend status' }}\"\n    }\n  ]\n}",
+                            "options": {}
+                  },
+                  "id": "dev2-claude",
+                  "name": "Frontend Brain",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const response = $input.first().json;\nconst content = response.content?.[0]?.text || 'No frontend output';\nconst hasCode = content.includes('```');\nconst hasReact = content.includes('React') || content.includes('tsx');\nreturn [{ json: { agent: 'DEV-002', department: 'Frontend Development', status: 'completed', has_code: hasCode, has_react: hasReact, output: content, model: response.model, tokens_used: response.usage?.input_tokens + response.usage?.output_tokens, timestamp: new Date().toISOString() } }];"
+                  },
+                  "id": "dev2-format",
+                  "name": "Format Output",
+                  "type": "n8n-nodes-base.code",
+                  "position": [650, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "dev2-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [850, 300]
+          }
+    ],
+    "connections": {
+          "DEV-002 Receiver": { "main": [[{ "node": "Frontend Brain", "type": "main", "index": 0 }]] },
+          "Frontend Brain": { "main": [[{ "node": "Format Output", "type": "main", "index": 0 }]] },
+          "Format Output": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-DEVELOPMENT" }]
+}
