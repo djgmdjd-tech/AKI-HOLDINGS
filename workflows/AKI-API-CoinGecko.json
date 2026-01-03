@@ -1,0 +1,67 @@
+{
+    "name": "AKI-API-CoinGecko",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-coingecko",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "cg-webhook",
+                  "name": "CoinGecko Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-coingecko"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\nconst operation = request.operation || 'PRICE';\n\nlet apiUrl = 'https://api.coingecko.com/api/v3';\nlet params = {};\n\nswitch (operation.toUpperCase()) {\n  case 'PRICE':\n    apiUrl += '/simple/price';\n    params = {\n      ids: request.coins || 'bitcoin,ethereum',\n      vs_currencies: request.currencies || 'usd',\n      include_24hr_change: 'true',\n      include_market_cap: 'true'\n    };\n    break;\n  case 'MARKET':\n    apiUrl += '/coins/markets';\n    params = {\n      vs_currency: request.currency || 'usd',\n      order: request.order || 'market_cap_desc',\n      per_page: request.limit || 100,\n      page: request.page || 1,\n      sparkline: 'false'\n    };\n    if (request.ids) params.ids = request.ids;\n    break;\n  case 'COIN':\n    apiUrl += `/coins/${request.coin_id || 'bitcoin'}`;\n    params = {\n      localization: 'false',\n      tickers: request.tickers || 'false',\n      market_data: 'true',\n      community_data: 'false',\n      developer_data: 'false'\n    };\n    break;\n  case 'HISTORY':\n    apiUrl += `/coins/${request.coin_id || 'bitcoin'}/market_chart`;\n    params = {\n      vs_currency: request.currency || 'usd',\n      days: request.days || '7'\n    };\n    break;\n  case 'TRENDING':\n    apiUrl += '/search/trending';\n    break;\n  case 'GLOBAL':\n    apiUrl += '/global';\n    break;\n}\n\nconst queryString = Object.entries(params)\n  .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)\n  .join('&');\n\nconst fullUrl = queryString ? `${apiUrl}?${queryString}` : apiUrl;\n\nreturn [{ json: { url: fullUrl, operation: operation } }];"
+                  },
+                  "id": "build-cg-request",
+                  "name": "Build Request",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "GET",
+                            "url": "={{ $json.url }}",
+                            "options": { "timeout": 10000 }
+                  },
+                  "id": "call-coingecko",
+                  "name": "Call CoinGecko",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [650, 300]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const response = $input.first().json;\nconst operation = $('Build Request').first().json.operation;\n\nlet formattedData = {\n  source: 'CoinGecko',\n  operation: operation,\n  timestamp: new Date().toISOString(),\n  data: response\n};\n\nif (operation === 'PRICE' && response) {\n  formattedData.summary = Object.entries(response).map(([coin, data]) => ({\n    coin: coin,\n    price_usd: data.usd,\n    change_24h: data.usd_24h_change?.toFixed(2) + '%',\n    market_cap: data.usd_market_cap\n  }));\n}\n\nif (operation === 'TRENDING' && response?.coins) {\n  formattedData.summary = response.coins.map(c => ({\n    name: c.item.name,\n    symbol: c.item.symbol,\n    rank: c.item.market_cap_rank\n  }));\n}\n\nif (operation === 'GLOBAL' && response?.data) {\n  formattedData.summary = {\n    total_market_cap_usd: response.data.total_market_cap?.usd,\n    total_volume_usd: response.data.total_volume?.usd,\n    btc_dominance: response.data.market_cap_percentage?.btc?.toFixed(2) + '%',\n    active_cryptocurrencies: response.data.active_cryptocurrencies\n  };\n}\n\nreturn [{ json: formattedData }];"
+                  },
+                  "id": "format-cg-response",
+                  "name": "Format Response",
+                  "type": "n8n-nodes-base.code",
+                  "position": [850, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "cg-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [1050, 300]
+          }
+    ],
+    "connections": {
+          "CoinGecko Request": { "main": [[{ "node": "Build Request", "type": "main", "index": 0 }]] },
+          "Build Request": { "main": [[{ "node": "Call CoinGecko", "type": "main", "index": 0 }]] },
+          "Call CoinGecko": { "main": [[{ "node": "Format Response", "type": "main", "index": 0 }]] },
+          "Format Response": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-API" }, { "name": "AKI-MARKET-DATA" }]
+}
