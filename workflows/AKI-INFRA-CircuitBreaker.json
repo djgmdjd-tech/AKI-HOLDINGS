@@ -1,0 +1,45 @@
+{
+    "name": "AKI-INFRA-CircuitBreaker",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-circuit-breaker",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "cb-webhook",
+                  "name": "Circuit Breaker Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-circuit-breaker"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\nconst operation = request.operation || 'CHECK';\nconst serviceId = request.service_id || 'default';\n\nconst store = $getWorkflowStaticData('global');\nif (!store.circuit_breakers) {\n  store.circuit_breakers = {};\n}\n\n// Circuit Breaker States: CLOSED (normal), OPEN (blocking), HALF_OPEN (testing)\nconst config = {\n  failure_threshold: 5,\n  success_threshold: 3,\n  timeout_ms: 30000,\n  half_open_max_calls: 3\n};\n\nlet cb = store.circuit_breakers[serviceId];\nif (!cb) {\n  cb = {\n    state: 'CLOSED',\n    failure_count: 0,\n    success_count: 0,\n    last_failure_time: null,\n    last_state_change: new Date().toISOString(),\n    total_failures: 0,\n    total_successes: 0,\n    half_open_calls: 0\n  };\n  store.circuit_breakers[serviceId] = cb;\n}\n\nlet result = { service_id: serviceId };\n\nswitch (operation.toUpperCase()) {\n  case 'CHECK':\n    const now = Date.now();\n    if (cb.state === 'OPEN') {\n      const timeSinceFailure = now - new Date(cb.last_failure_time).getTime();\n      if (timeSinceFailure >= config.timeout_ms) {\n        cb.state = 'HALF_OPEN';\n        cb.half_open_calls = 0;\n        cb.success_count = 0;\n        cb.last_state_change = new Date().toISOString();\n      }\n    }\n    result.allowed = cb.state !== 'OPEN';\n    result.state = cb.state;\n    result.failure_count = cb.failure_count;\n    if (cb.state === 'HALF_OPEN') {\n      cb.half_open_calls++;\n      result.half_open_calls = cb.half_open_calls;\n      if (cb.half_open_calls > config.half_open_max_calls) {\n        result.allowed = false;\n      }\n    }\n    break;\n  case 'SUCCESS':\n    cb.total_successes++;\n    if (cb.state === 'HALF_OPEN') {\n      cb.success_count++;\n      if (cb.success_count >= config.success_threshold) {\n        cb.state = 'CLOSED';\n        cb.failure_count = 0;\n        cb.success_count = 0;\n        cb.last_state_change = new Date().toISOString();\n      }\n    } else if (cb.state === 'CLOSED') {\n      cb.failure_count = Math.max(0, cb.failure_count - 1);\n    }\n    result.recorded = true;\n    result.state = cb.state;\n    break;\n  case 'FAILURE':\n    cb.failure_count++;\n    cb.total_failures++;\n    cb.last_failure_time = new Date().toISOString();\n    if (cb.state === 'HALF_OPEN') {\n      cb.state = 'OPEN';\n      cb.last_state_change = new Date().toISOString();\n    } else if (cb.state === 'CLOSED' && cb.failure_count >= config.failure_threshold) {\n      cb.state = 'OPEN';\n      cb.last_state_change = new Date().toISOString();\n    }\n    result.recorded = true;\n    result.state = cb.state;\n    result.failure_count = cb.failure_count;\n    break;\n  case 'RESET':\n    cb.state = 'CLOSED';\n    cb.failure_count = 0;\n    cb.success_count = 0;\n    cb.half_open_calls = 0;\n    cb.last_state_change = new Date().toISOString();\n    result.reset = true;\n    break;\n  case 'STATUS':\n    result = { ...cb, service_id: serviceId, config: config };\n    break;\n  case 'LIST_ALL':\n    result.circuits = Object.entries(store.circuit_breakers).map(([id, state]) => ({\n      service_id: id,\n      state: state.state,\n      failure_count: state.failure_count,\n      last_state_change: state.last_state_change\n    }));\n    break;\n}\n\nresult.timestamp = new Date().toISOString();\nreturn [{ json: result }];"
+                  },
+                  "id": "cb-processor",
+                  "name": "Process Circuit Breaker",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "cb-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Circuit Breaker Request": { "main": [[{ "node": "Process Circuit Breaker", "type": "main", "index": 0 }]] },
+          "Process Circuit Breaker": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-INFRA" }, { "name": "AKI-RESILIENCE" }]
+}
