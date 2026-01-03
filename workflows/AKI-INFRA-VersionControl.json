@@ -1,0 +1,45 @@
+{
+    "name": "AKI-INFRA-VersionControl",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-version-control",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "vc-webhook",
+                  "name": "Version Control Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-version-control"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\nconst operation = request.operation || 'GET';\nconst resourceType = request.type || 'prompt';\nconst resourceId = request.id || 'default';\n\nconst store = $getWorkflowStaticData('global');\nif (!store.versions) {\n  store.versions = { prompts: {}, strategies: {}, configs: {}, bots: {} };\n}\n\nconst versionStore = store.versions[resourceType + 's'] || store.versions.configs;\nlet result = { type: resourceType, id: resourceId };\n\nswitch (operation.toUpperCase()) {\n  case 'SAVE':\n    if (!versionStore[resourceId]) {\n      versionStore[resourceId] = { current_version: 0, versions: [], created_at: new Date().toISOString() };\n    }\n    const resource = versionStore[resourceId];\n    resource.current_version++;\n    const newVersion = {\n      version: resource.current_version,\n      content: request.content,\n      metadata: request.metadata || {},\n      created_by: request.created_by || 'SYSTEM',\n      created_at: new Date().toISOString(),\n      commit_message: request.message || 'No message'\n    };\n    resource.versions.push(newVersion);\n    resource.latest = newVersion;\n    if (resource.versions.length > 50) {\n      resource.versions = resource.versions.slice(-50);\n    }\n    result.success = true;\n    result.version = resource.current_version;\n    result.saved = newVersion;\n    break;\n  case 'GET':\n    const getResource = versionStore[resourceId];\n    if (getResource) {\n      const version = request.version || getResource.current_version;\n      const versionData = getResource.versions.find(v => v.version === version);\n      if (versionData) {\n        result.success = true;\n        result.version = versionData;\n        result.current_version = getResource.current_version;\n      } else {\n        result.success = false;\n        result.error = 'Version not found';\n      }\n    } else {\n      result.success = false;\n      result.error = 'Resource not found';\n    }\n    break;\n  case 'LIST_VERSIONS':\n    const listResource = versionStore[resourceId];\n    if (listResource) {\n      result.success = true;\n      result.current_version = listResource.current_version;\n      result.versions = listResource.versions.map(v => ({ version: v.version, created_at: v.created_at, created_by: v.created_by, message: v.commit_message }));\n    } else {\n      result.success = false;\n      result.error = 'Resource not found';\n    }\n    break;\n  case 'ROLLBACK':\n    const rbResource = versionStore[resourceId];\n    if (rbResource) {\n      const targetVersion = request.version;\n      const targetData = rbResource.versions.find(v => v.version === targetVersion);\n      if (targetData) {\n        rbResource.current_version++;\n        const rollbackVersion = {\n          version: rbResource.current_version,\n          content: targetData.content,\n          metadata: { ...targetData.metadata, rolled_back_from: targetVersion },\n          created_by: request.created_by || 'SYSTEM',\n          created_at: new Date().toISOString(),\n          commit_message: `Rollback to version ${targetVersion}`\n        };\n        rbResource.versions.push(rollbackVersion);\n        rbResource.latest = rollbackVersion;\n        result.success = true;\n        result.rolled_back_to = targetVersion;\n        result.new_version = rbResource.current_version;\n      } else {\n        result.success = false;\n        result.error = 'Target version not found';\n      }\n    } else {\n      result.success = false;\n      result.error = 'Resource not found';\n    }\n    break;\n  case 'LIST_RESOURCES':\n    result.resources = Object.keys(versionStore).map(id => ({\n      id,\n      current_version: versionStore[id].current_version,\n      created_at: versionStore[id].created_at,\n      latest_update: versionStore[id].latest?.created_at\n    }));\n    result.success = true;\n    break;\n}\n\nresult.timestamp = new Date().toISOString();\nreturn [{ json: result }];"
+                  },
+                  "id": "vc-processor",
+                  "name": "Process Version Control",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "vc-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Version Control Request": { "main": [[{ "node": "Process Version Control", "type": "main", "index": 0 }]] },
+          "Process Version Control": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-INFRA" }, { "name": "AKI-VERSION" }]
+}
