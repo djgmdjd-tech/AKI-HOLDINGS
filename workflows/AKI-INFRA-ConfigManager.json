@@ -1,0 +1,45 @@
+{
+    "name": "AKI-INFRA-ConfigManager",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-config",
+                    "responseMode": "responseNode",
+        "options": {}
+                  },
+        "id": "config-webhook",
+      "name": "Config Request",
+                  "type": "n8n-nodes-base.webhook",
+                          "position": [250, 300],
+                          "webhookId": "aki-config"
+          },
+                        {
+                                "parameters": {
+                                          "jsCode": "const request = $input.first().json.body || $input.first().json;\nconst operation = request.operation || 'GET';\n\nconst store = $getWorkflowStaticData('global');\nif (!store.config) {\n  store.config = {\n    system: { name: 'AKI Holdings', version: '2.0.0', environment: 'production', debug_mode: false, maintenance_mode: false },\n    trading: { enabled: true, max_position_usd: 10000, max_daily_loss_usd: 500, max_single_trade_usd: 1000, allowed_exchanges: ['binance', 'bybit', 'okx'], allowed_assets: ['BTC', 'ETH', 'SOL', 'BNB', 'XRP'], risk_level: 'MEDIUM' },\n    bots: { arbitrage_enabled: true, arbitrage_min_profit: 0.15, triangular_enabled: true, funding_rate_enabled: true, polymarket_enabled: true, defi_scanner_enabled: true },\n    notifications: { telegram_enabled: true, alert_on_trade: true, alert_on_error: true, alert_on_high_profit: true, daily_report: true, report_hour: 9 },\n    api_limits: { anthropic_rpm: 50, coingecko_rpm: 30, binance_rpm: 1200 },\n    agents: { auto_spawn_specialists: true, max_specialists_per_manager: 10, specialist_timeout_ms: 60000 },\n    security: { require_approval_above_usd: 500, auto_approve_below_usd: 50, max_auto_trades_per_hour: 20, cooldown_after_loss_minutes: 5 }\n  };\n}\n\nlet result = {};\n\nswitch (operation.toUpperCase()) {\n  case 'GET':\n    if (request.path) {\n      const parts = request.path.split('.');\n      let value = store.config;\n      for (const part of parts) value = value?.[part];\n      result = { success: true, path: request.path, value: value };\n    } else if (request.section) {\n      result = { success: true, section: request.section, config: store.config[request.section] };\n    } else {\n      result = { success: true, config: store.config };\n    }\n    break;\n  case 'SET':\n    if (request.path && request.value !== undefined) {\n      const parts = request.path.split('.');\n      let target = store.config;\n      for (let i = 0; i < parts.length - 1; i++) {\n        if (!target[parts[i]]) target[parts[i]] = {};\n        target = target[parts[i]];\n      }\n      const oldValue = target[parts[parts.length - 1]];\n      target[parts[parts.length - 1]] = request.value;\n      result = { success: true, path: request.path, old_value: oldValue, new_value: request.value };\n    } else {\n      result = { success: false, error: 'Path and value required' };\n    }\n    break;\n  case 'UPDATE_SECTION':\n    if (request.section && request.values) {\n      store.config[request.section] = { ...store.config[request.section], ...request.values };\n      result = { success: true, section: request.section, updated: true, changes: Object.keys(request.values) };\n    } else {\n      result = { success: false, error: 'Section and values required' };\n    }\n    break;\n  case 'VALIDATE':\n    const errors = [];\n    const config = store.config;\n    if (config.trading.max_position_usd < 100) errors.push('trading.max_position_usd must be at least 100');\n    if (config.trading.max_daily_loss_usd > config.trading.max_position_usd) errors.push('max_daily_loss_usd should not exceed max_position_usd');\n    if (config.security.max_auto_trades_per_hour > 100) errors.push('max_auto_trades_per_hour exceeds safe limit of 100');\n    result = { success: errors.length === 0, valid: errors.length === 0, errors: errors };\n    break;\n  case 'EXPORT':\n    result = { success: true, export_id: `CONFIG-${Date.now().toString(36)}`, exported_at: new Date().toISOString(), config: store.config };\n    break;\n  case 'IMPORT':\n    if (request.config && request.config.system && request.config.trading) {\n      store.config = { ...store.config, ...request.config };\n      result = { success: true, imported: true };\n    } else {\n      result = { success: false, error: 'Invalid config structure' };\n    }\n    break;\n}\n\nresult.timestamp = new Date().toISOString();\nreturn [{ json: result }];"
+                                },
+                                "id": "config-processor",
+                                "name": "Process Config",
+                                "type": "n8n-nodes-base.code",
+                                "position": [450, 300]
+                        },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "config-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Config Request": { "main": [[{ "node": "Process Config", "type": "main", "index": 0 }]] },
+          "Process Config": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-INFRA" }, { "name": "AKI-CONFIG" }]
+}
