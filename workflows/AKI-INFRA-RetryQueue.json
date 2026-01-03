@@ -1,0 +1,45 @@
+{
+    "name": "AKI-INFRA-RetryQueue",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-retry-queue",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "retry-webhook",
+                  "name": "Retry Queue Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-retry-queue"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\nconst operation = request.operation || 'ADD';\n\nconst store = $getWorkflowStaticData('global');\nif (!store.retry_queue) {\n  store.retry_queue = [];\n}\nif (!store.dead_letter_queue) {\n  store.dead_letter_queue = [];\n}\n\nconst config = {\n  max_retries: 5,\n  base_delay_ms: 1000,\n  max_delay_ms: 60000,\n  backoff_multiplier: 2\n};\n\nlet result = {};\n\nswitch (operation.toUpperCase()) {\n  case 'ADD':\n    const item = {\n      id: `RETRY-${Date.now().toString(36).toUpperCase()}`,\n      created_at: new Date().toISOString(),\n      task: request.task,\n      target_endpoint: request.endpoint,\n      payload: request.payload,\n      retry_count: 0,\n      max_retries: request.max_retries || config.max_retries,\n      next_retry_at: new Date().toISOString(),\n      last_error: null,\n      status: 'PENDING'\n    };\n    store.retry_queue.push(item);\n    result = { success: true, item_id: item.id, queue_size: store.retry_queue.length };\n    break;\n  case 'GET_NEXT':\n    const now = new Date();\n    const pendingItems = store.retry_queue.filter(item => \n      item.status === 'PENDING' && new Date(item.next_retry_at) <= now\n    );\n    if (pendingItems.length > 0) {\n      const nextItem = pendingItems[0];\n      nextItem.status = 'PROCESSING';\n      result = { found: true, item: nextItem };\n    } else {\n      result = { found: false, next_available: store.retry_queue.find(i => i.status === 'PENDING')?.next_retry_at };\n    }\n    break;\n  case 'MARK_SUCCESS':\n    const successItem = store.retry_queue.find(i => i.id === request.item_id);\n    if (successItem) {\n      store.retry_queue = store.retry_queue.filter(i => i.id !== request.item_id);\n      result = { success: true, removed: true };\n    } else {\n      result = { success: false, error: 'Item not found' };\n    }\n    break;\n  case 'MARK_FAILURE':\n    const failItem = store.retry_queue.find(i => i.id === request.item_id);\n    if (failItem) {\n      failItem.retry_count++;\n      failItem.last_error = request.error || 'Unknown error';\n      if (failItem.retry_count >= failItem.max_retries) {\n        failItem.status = 'DEAD';\n        failItem.died_at = new Date().toISOString();\n        store.dead_letter_queue.push(failItem);\n        store.retry_queue = store.retry_queue.filter(i => i.id !== request.item_id);\n        result = { success: true, moved_to_dlq: true, item_id: failItem.id };\n      } else {\n        const delay = Math.min(\n          config.base_delay_ms * Math.pow(config.backoff_multiplier, failItem.retry_count),\n          config.max_delay_ms\n        );\n        failItem.next_retry_at = new Date(Date.now() + delay).toISOString();\n        failItem.status = 'PENDING';\n        result = { success: true, retry_scheduled: true, retry_count: failItem.retry_count, next_retry_at: failItem.next_retry_at };\n      }\n    } else {\n      result = { success: false, error: 'Item not found' };\n    }\n    break;\n  case 'GET_STATS':\n    result = {\n      queue_size: store.retry_queue.length,\n      pending: store.retry_queue.filter(i => i.status === 'PENDING').length,\n      processing: store.retry_queue.filter(i => i.status === 'PROCESSING').length,\n      dead_letter_size: store.dead_letter_queue.length,\n      oldest_item: store.retry_queue[0]?.created_at || null\n    };\n    break;\n  case 'GET_DLQ':\n    result = { items: store.dead_letter_queue.slice(-50), total: store.dead_letter_queue.length };\n    break;\n  case 'RETRY_DLQ_ITEM':\n    const dlqItem = store.dead_letter_queue.find(i => i.id === request.item_id);\n    if (dlqItem) {\n      dlqItem.retry_count = 0;\n      dlqItem.status = 'PENDING';\n      dlqItem.next_retry_at = new Date().toISOString();\n      delete dlqItem.died_at;\n      store.retry_queue.push(dlqItem);\n      store.dead_letter_queue = store.dead_letter_queue.filter(i => i.id !== request.item_id);\n      result = { success: true, moved_to_queue: true };\n    } else {\n      result = { success: false, error: 'Item not found in DLQ' };\n    }\n    break;\n}\n\nresult.timestamp = new Date().toISOString();\nreturn [{ json: result }];"
+                  },
+                  "id": "retry-processor",
+                  "name": "Process Retry Queue",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "retry-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Retry Queue Request": { "main": [[{ "node": "Process Retry Queue", "type": "main", "index": 0 }]] },
+          "Process Retry Queue": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-INFRA" }, { "name": "AKI-RESILIENCE" }]
+}
