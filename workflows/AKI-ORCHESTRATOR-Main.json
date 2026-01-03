@@ -1,0 +1,68 @@
+{
+    "name": "AKI-ORCHESTRATOR-MainPipeline",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-orchestrate",
+                            "responseMode": "responseNode",
+                            "options": {}
+          },
+            "id": "orch-webhook",
+                  "name": "Task Input",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 400],
+                  "webhookId": "aki-orchestrate"
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "https://api.anthropic.com/v1/messages",
+                            "sendHeaders": true,
+                            "headerParameters": {
+                                        "parameters": [
+                                                      { "name": "x-api-key", "value": "={{ $vars.ANTHROPIC_API_KEY }}" },
+                                                      { "name": "anthropic-version", "value": "2023-06-01" },
+                                                      { "name": "content-type", "value": "application/json" }
+                                        ]
+                            },
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 1024,\n  \"system\": \"You are the AKI Holdings Task Orchestrator. Analyze tasks and respond with JSON: {task_id, priority, execution_steps, estimated_cost_usd}\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"Task: {{ $json.body.task || $json.task || 'No task' }}\" }]\n}",
+                            "options": {}
+                  },
+                  "id": "plan-task",
+                  "name": "Plan Execution",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [450, 400]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const response = $input.first().json;\nconst planText = response.content?.[0]?.text || '{}';\nlet plan;\ntry {\n  const jsonMatch = planText.match(/\\{[\\s\\S]*\\}/);\n  plan = jsonMatch ? JSON.parse(jsonMatch[0]) : { error: 'Failed to parse' };\n} catch (e) {\n  plan = { error: 'JSON parse error', raw: planText };\n}\nplan.orchestrator_timestamp = new Date().toISOString();\nplan.status = 'PLANNED';\nreturn [{ json: plan }];"
+                  },
+                          "id": "parse-plan",
+                  "name": "Parse Plan",
+                  "type": "n8n-nodes-base.code",
+                  "position": [650, 400]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "orch-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [850, 400]
+          }
+    ],
+    "connections": {
+          "Task Input": { "main": [[{ "node": "Plan Execution", "type": "main", "index": 0 }]] },
+          "Plan Execution": { "main": [[{ "node": "Parse Plan", "type": "main", "index": 0 }]] },
+          "Parse Plan": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-CORE" }, { "name": "AKI-ORCHESTRATOR" }]
+}
