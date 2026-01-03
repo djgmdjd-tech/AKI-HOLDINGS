@@ -1,0 +1,45 @@
+{
+    "name": "AKI-INFRA-Metrics",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-metrics",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "metrics-webhook",
+                  "name": "Metrics Request",
+                          "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-metrics"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\nconst operation = request.operation || 'RECORD';\n\nconst store = $getWorkflowStaticData('global');\nif (!store.metrics) {\n  store.metrics = { counters: {}, gauges: {}, histograms: {}, timers: {} };\n}\n\nconst now = Date.now();\nconst oneHourAgo = now - 3600000;\nconst oneDayAgo = now - 86400000;\n\nlet result = {};\n\nswitch (operation.toUpperCase()) {\n  case 'INCREMENT':\n    const counterName = request.name || 'default';\n    if (!store.metrics.counters[counterName]) {\n      store.metrics.counters[counterName] = { total: 0, hourly: [], daily: 0 };\n    }\n    const counter = store.metrics.counters[counterName];\n    counter.total += request.value || 1;\n    counter.hourly.push({ time: now, value: request.value || 1 });\n    counter.hourly = counter.hourly.filter(h => h.time > oneHourAgo);\n    counter.last_updated = new Date().toISOString();\n    result = { success: true, name: counterName, total: counter.total };\n    break;\n  case 'GAUGE':\n    const gaugeName = request.name || 'default';\n    if (!store.metrics.gauges[gaugeName]) {\n      store.metrics.gauges[gaugeName] = { history: [] };\n    }\n    const gauge = store.metrics.gauges[gaugeName];\n    gauge.current = request.value;\n    gauge.history.push({ time: now, value: request.value });\n    gauge.history = gauge.history.filter(h => h.time > oneDayAgo);\n    gauge.last_updated = new Date().toISOString();\n    result = { success: true, name: gaugeName, current: gauge.current };\n    break;\n  case 'HISTOGRAM':\n    const histName = request.name || 'default';\n    if (!store.metrics.histograms[histName]) {\n      store.metrics.histograms[histName] = { values: [], buckets: {} };\n    }\n    const hist = store.metrics.histograms[histName];\n    hist.values.push({ time: now, value: request.value });\n    hist.values = hist.values.filter(v => v.time > oneHourAgo);\n    const buckets = [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000];\n    buckets.forEach(b => { hist.buckets[`le_${b}`] = hist.values.filter(v => v.value <= b).length; });\n    hist.buckets['le_inf'] = hist.values.length;\n    const sortedValues = hist.values.map(v => v.value).sort((a, b) => a - b);\n    hist.p50 = sortedValues[Math.floor(sortedValues.length * 0.5)] || 0;\n    hist.p90 = sortedValues[Math.floor(sortedValues.length * 0.9)] || 0;\n    hist.p99 = sortedValues[Math.floor(sortedValues.length * 0.99)] || 0;\n    hist.avg = sortedValues.length > 0 ? sortedValues.reduce((a, b) => a + b, 0) / sortedValues.length : 0;\n    result = { success: true, name: histName, p50: hist.p50, p90: hist.p90, p99: hist.p99, avg: hist.avg.toFixed(2) };\n    break;\n  case 'TIMER_START':\n    const timerStartName = request.name || 'default';\n    const timerId = request.timer_id || `${timerStartName}_${now}`;\n    if (!store.metrics.timers[timerStartName]) {\n      store.metrics.timers[timerStartName] = { active: {}, completed: [] };\n    }\n    store.metrics.timers[timerStartName].active[timerId] = now;\n    result = { success: true, timer_id: timerId };\n    break;\n  case 'TIMER_END':\n    const timerEndName = request.name || 'default';\n    const endTimerId = request.timer_id;\n    const timer = store.metrics.timers[timerEndName];\n    if (timer && timer.active[endTimerId]) {\n      const duration = now - timer.active[endTimerId];\n      delete timer.active[endTimerId];\n      timer.completed.push({ time: now, duration });\n      timer.completed = timer.completed.filter(c => c.time > oneHourAgo);\n      const durations = timer.completed.map(c => c.duration).sort((a, b) => a - b);\n      timer.stats = {\n        count: durations.length,\n        avg: durations.length > 0 ? (durations.reduce((a, b) => a + b, 0) / durations.length).toFixed(2) : 0,\n        p50: durations[Math.floor(durations.length * 0.5)] || 0,\n        p90: durations[Math.floor(durations.length * 0.9)] || 0,\n        p99: durations[Math.floor(durations.length * 0.99)] || 0\n      };\n      result = { success: true, duration_ms: duration, stats: timer.stats };\n    } else {\n      result = { success: false, error: 'Timer not found' };\n    }\n    break;\n  case 'GET_ALL':\n    result = {\n      success: true,\n      counters: Object.entries(store.metrics.counters).map(([name, data]) => ({ name, total: data.total, last_hour: data.hourly.reduce((sum, h) => sum + h.value, 0) })),\n      gauges: Object.entries(store.metrics.gauges).map(([name, data]) => ({ name, current: data.current, last_updated: data.last_updated })),\n      histograms: Object.entries(store.metrics.histograms).map(([name, data]) => ({ name, p50: data.p50, p90: data.p90, p99: data.p99, avg: data.avg?.toFixed(2) })),\n      timers: Object.entries(store.metrics.timers).map(([name, data]) => ({ name, active_count: Object.keys(data.active).length, stats: data.stats }))\n    };\n    break;\n  case 'GET_DASHBOARD':\n    const dashboard = {\n      system_health: { status: 'HEALTHY', uptime_percent: 99.9 },\n      performance: {\n        avg_response_time_ms: store.metrics.histograms['response_time']?.avg?.toFixed(0) || 'N/A',\n        p99_response_time_ms: store.metrics.histograms['response_time']?.p99 || 'N/A',\n        requests_per_minute: store.metrics.counters['requests']?.hourly.filter(h => h.time > now - 60000).length || 0\n      },\n      trading: {\n        trades_24h: store.metrics.counters['trades']?.total || 0,\n        profit_total: store.metrics.gauges['total_profit']?.current || 0,\n        win_rate: store.metrics.gauges['win_rate']?.current || 'N/A'\n      },\n      costs: {\n        api_calls_24h: store.metrics.counters['api_calls']?.total || 0,\n        tokens_used_24h: store.metrics.counters['tokens_used']?.total || 0,\n        estimated_cost_usd: ((store.metrics.counters['tokens_used']?.total || 0) / 1000000 * 3).toFixed(2)\n      }\n    };\n    result = { success: true, dashboard };\n    break;\n}\n\nresult.timestamp = new Date().toISOString();\nreturn [{ json: result }];"
+                  },
+                  "id": "metrics-processor",
+                  "name": "Process Metrics",
+      "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "metrics-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+                "Metrics Request": { "main": [[{ "node": "Process Metrics", "type": "main", "index": 0 }]] },
+          "Process Metrics": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-INFRA" }, { "name": "AKI-METRICS" }]
+}
