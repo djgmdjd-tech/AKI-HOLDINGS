@@ -1,0 +1,45 @@
+{
+    "name": "AKI-INFRA-RateLimiter",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-rate-limiter",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "rl-webhook",
+            "name": "Rate Limiter Request",
+                  "type": "n8n-nodes-base.webhook",
+                          "position": [250, 300],
+                  "webhookId": "aki-rate-limiter"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\nconst operation = request.operation || 'CHECK';\nconst resourceId = request.resource_id || 'default';\n\nconst store = $getWorkflowStaticData('global');\nif (!store.rate_limits) {\n  store.rate_limits = {};\n}\n\nconst configs = {\n  'anthropic_api': { requests_per_minute: 50, requests_per_hour: 1000, tokens_per_minute: 100000 },\n  'coingecko_api': { requests_per_minute: 30, requests_per_hour: 500 },\n  'binance_api': { requests_per_minute: 1200, requests_per_hour: 72000 },\n  'polymarket_api': { requests_per_minute: 60, requests_per_hour: 1000 },\n  'telegram_api': { requests_per_minute: 30, requests_per_hour: 1000 },\n  'default': { requests_per_minute: 60, requests_per_hour: 1000 }\n};\n\nconst config = configs[resourceId] || configs['default'];\nconst now = Date.now();\nconst oneMinuteAgo = now - 60000;\nconst oneHourAgo = now - 3600000;\n\nlet rl = store.rate_limits[resourceId];\nif (!rl) {\n  rl = { requests: [], tokens_used: [] };\n  store.rate_limits[resourceId] = rl;\n}\n\nrl.requests = rl.requests.filter(t => t > oneHourAgo);\nrl.tokens_used = rl.tokens_used.filter(t => t.time > oneMinuteAgo);\n\nlet result = { resource_id: resourceId };\n\nswitch (operation.toUpperCase()) {\n  case 'CHECK':\n    const requestsLastMinute = rl.requests.filter(t => t > oneMinuteAgo).length;\n    const requestsLastHour = rl.requests.length;\n    const tokensLastMinute = rl.tokens_used.reduce((sum, t) => sum + t.tokens, 0);\n    const allowedByMinute = requestsLastMinute < config.requests_per_minute;\n    const allowedByHour = requestsLastHour < config.requests_per_hour;\n    const allowedByTokens = !config.tokens_per_minute || tokensLastMinute < config.tokens_per_minute;\n    result.allowed = allowedByMinute && allowedByHour && allowedByTokens;\n    result.current = { requests_per_minute: requestsLastMinute, requests_per_hour: requestsLastHour, tokens_per_minute: tokensLastMinute };\n    result.limits = config;\n    result.remaining = { requests_per_minute: Math.max(0, config.requests_per_minute - requestsLastMinute), requests_per_hour: Math.max(0, config.requests_per_hour - requestsLastHour) };\n    if (!result.allowed) {\n      if (!allowedByMinute) {\n        const oldestInMinute = rl.requests.filter(t => t > oneMinuteAgo).sort()[0];\n        result.retry_after_ms = oldestInMinute ? (oldestInMinute + 60000 - now) : 60000;\n      } else if (!allowedByHour) {\n        const oldestInHour = rl.requests.sort()[0];\n        result.retry_after_ms = oldestInHour ? (oldestInHour + 3600000 - now) : 3600000;\n      }\n    }\n    break;\n  case 'RECORD':\n    rl.requests.push(now);\n    if (request.tokens) {\n      rl.tokens_used.push({ time: now, tokens: request.tokens });\n    }\n    result.recorded = true;\n    result.total_requests_hour = rl.requests.length;\n    break;\n  case 'GET_STATS':\n    const statsMinute = rl.requests.filter(t => t > oneMinuteAgo).length;\n    const statsHour = rl.requests.length;\n    result.stats = {\n      requests_last_minute: statsMinute,\n      requests_last_hour: statsHour,\n      tokens_last_minute: rl.tokens_used.reduce((sum, t) => sum + t.tokens, 0),\n      utilization_minute: ((statsMinute / config.requests_per_minute) * 100).toFixed(1) + '%',\n      utilization_hour: ((statsHour / config.requests_per_hour) * 100).toFixed(1) + '%'\n    };\n    result.limits = config;\n    break;\n  case 'RESET':\n    rl.requests = [];\n    rl.tokens_used = [];\n    result.reset = true;\n    break;\n}\n\nresult.timestamp = new Date().toISOString();\nreturn [{ json: result }];"
+                  },
+                  "id": "rl-processor",
+                  "name": "Process Rate Limiter",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "rl-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Rate Limiter Request": { "main": [[{ "node": "Process Rate Limiter", "type": "main", "index": 0 }]] },
+          "Process Rate Limiter": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-INFRA" }, { "name": "AKI-RESILIENCE" }]
+}
