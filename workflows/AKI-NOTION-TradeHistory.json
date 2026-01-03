@@ -1,0 +1,45 @@
+{
+    "name": "AKI-NOTION-TradeHistory",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-trade-history",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "trade-webhook",
+                  "name": "Trade Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-trade-history"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\nconst operation = request.operation || 'RECORD';\n\nconst tradeStore = $getWorkflowStaticData('global');\nif (!tradeStore.trades) tradeStore.trades = [];\nif (!tradeStore.trade_stats) tradeStore.trade_stats = { total_pnl: 0, wins: 0, losses: 0, total_volume: 0 };\n\nlet result = {};\n\nswitch (operation.toUpperCase()) {\n  case 'RECORD':\n    const trade = {\n      id: `TRD-${Date.now().toString(36).toUpperCase()}`,\n      timestamp: new Date().toISOString(),\n      type: request.type || 'UNKNOWN',\n      asset: request.asset || 'UNKNOWN',\n      amount: request.amount || 0,\n      price: request.price || 0,\n      value_usd: (request.amount || 0) * (request.price || 0),\n      fee: request.fee || 0,\n      platform: request.platform || 'UNKNOWN',\n      strategy: request.strategy || null,\n      agent: request.agent || null,\n      pnl: request.pnl || null,\n      notes: request.notes || '',\n      status: request.status || 'EXECUTED'\n    };\n    \n    tradeStore.trades.push(trade);\n    \n    if (trade.pnl !== null) {\n      tradeStore.trade_stats.total_pnl += trade.pnl;\n      if (trade.pnl > 0) tradeStore.trade_stats.wins++;\n      if (trade.pnl < 0) tradeStore.trade_stats.losses++;\n    }\n    tradeStore.trade_stats.total_volume += trade.value_usd;\n    \n    if (tradeStore.trades.length > 1000) {\n      tradeStore.trades = tradeStore.trades.slice(-1000);\n    }\n    \n    result = { success: true, trade_id: trade.id, trade: trade };\n    break;\n    \n  case 'GET':\n    const getTrade = tradeStore.trades.find(t => t.id === request.trade_id);\n    if (getTrade) {\n      result = { success: true, trade: getTrade };\n    } else {\n      result = { success: false, error: 'Trade not found' };\n    }\n    break;\n    \n  case 'LIST':\n    let trades = [...tradeStore.trades];\n    if (request.asset) trades = trades.filter(t => t.asset === request.asset);\n    if (request.platform) trades = trades.filter(t => t.platform === request.platform);\n    if (request.strategy) trades = trades.filter(t => t.strategy === request.strategy);\n    if (request.agent) trades = trades.filter(t => t.agent === request.agent);\n    if (request.from_date) trades = trades.filter(t => new Date(t.timestamp) >= new Date(request.from_date));\n    if (request.to_date) trades = trades.filter(t => new Date(t.timestamp) <= new Date(request.to_date));\n    \n    trades.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));\n    \n    result = { success: true, trades: trades.slice(0, request.limit || 100), total: trades.length };\n    break;\n    \n  case 'GET_STATS':\n    const stats = { ...tradeStore.trade_stats };\n    stats.win_rate = stats.wins + stats.losses > 0 \n      ? ((stats.wins / (stats.wins + stats.losses)) * 100).toFixed(2) + '%' \n      : 'N/A';\n    stats.total_trades = tradeStore.trades.length;\n    stats.avg_trade_size = stats.total_trades > 0 \n      ? (stats.total_volume / stats.total_trades).toFixed(2) \n      : 0;\n    result = { success: true, stats: stats };\n    break;\n    \n  case 'GET_PNL_BY_STRATEGY':\n    const strategyPnl = {};\n    tradeStore.trades.forEach(t => {\n      if (t.strategy && t.pnl !== null) {\n        if (!strategyPnl[t.strategy]) {\n          strategyPnl[t.strategy] = { pnl: 0, trades: 0, wins: 0, losses: 0 };\n        }\n        strategyPnl[t.strategy].pnl += t.pnl;\n        strategyPnl[t.strategy].trades++;\n        if (t.pnl > 0) strategyPnl[t.strategy].wins++;\n        if (t.pnl < 0) strategyPnl[t.strategy].losses++;\n      }\n    });\n    result = { success: true, strategy_performance: strategyPnl };\n    break;\n}\n\nresult.timestamp = new Date().toISOString();\nreturn [{ json: result }];"
+                  },
+                  "id": "trade-processor",
+                  "name": "Process Trade",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "trade-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Trade Request": { "main": [[{ "node": "Process Trade", "type": "main", "index": 0 }]] },
+          "Process Trade": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-NOTION" }, { "name": "AKI-TRADING" }]
+}
