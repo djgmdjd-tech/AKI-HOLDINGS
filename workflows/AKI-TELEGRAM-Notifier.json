@@ -1,0 +1,60 @@
+{
+    "name": "AKI-TELEGRAM-Notifier",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-notify",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "notify-webhook",
+                  "name": "Notify Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-notify"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\n\nconst levelEmoji = {\n  'INFO': 'ℹ️',\n  'SUCCESS': '✅',\n  'WARNING': '⚠️',\n  'ERROR': '❌',\n  'CRITICAL': '🚨',\n  'TRADE': '💹',\n  'APPROVAL': '📋'\n};\n\nconst level = request.level || 'INFO';\nconst emoji = levelEmoji[level] || 'ℹ️';\n\nlet message = `${emoji} *${level}*\\n\\n`;\nmessage += request.title ? `*${request.title}*\\n\\n` : '';\nmessage += request.message || 'No message provided';\n\nif (request.details) {\n  message += '\\n\\n📎 *Details:*\\n';\n  if (typeof request.details === 'object') {\n    Object.entries(request.details).forEach(([key, value]) => {\n      message += `• ${key}: ${value}\\n`;\n    });\n  } else {\n    message += request.details;\n  }\n}\n\nif (request.actions) {\n  message += '\\n\\n🎯 *Required Actions:*\\n';\n  request.actions.forEach((action, i) => {\n    message += `${i + 1}. ${action}\\n`;\n  });\n}\n\nmessage += `\\n\\n⏰ ${new Date().toLocaleString('ko-KR')}`;\n\nlet replyMarkup = null;\nif (request.buttons) {\n  replyMarkup = {\n    inline_keyboard: request.buttons.map(row => \n      row.map(btn => ({ text: btn.text, callback_data: btn.data }))\n    )\n  };\n}\n\nreturn [{\n  json: {\n    chat_id: request.chat_id || '{{ $vars.CEO_TELEGRAM_CHAT_ID }}',\n    text: message,\n    parse_mode: 'Markdown',\n    reply_markup: replyMarkup,\n    disable_notification: level === 'INFO'\n  }\n}];"
+                  },
+                  "id": "build-notification",
+                  "name": "Build Notification",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/sendMessage",
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"chat_id\": \"{{ $json.chat_id }}\",\n  \"text\": \"{{ $json.text }}\",\n  \"parse_mode\": \"{{ $json.parse_mode }}\",\n  \"disable_notification\": {{ $json.disable_notification }}\n}",
+                            "options": {}
+                  },
+                  "id": "send-notification",
+                  "name": "Send to Telegram",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [650, 300]
+                  },
+                        {
+                                "parameters": {
+                                          "respondWith": "json",
+                                          "responseBody": "={{ JSON.stringify({ success: true, sent_to: $json.chat_id }) }}",
+                                          "options": {}
+                                },
+                                "id": "notify-respond",
+                                "name": "Respond",
+                                "type": "n8n-nodes-base.respondToWebhook",
+                                "position": [850, 300]
+                        }
+    ],
+    "connections": {
+          "Notify Request": { "main": [[{ "node": "Build Notification", "type": "main", "index": 0 }]] },
+          "Build Notification": { "main": [[{ "node": "Send to Telegram", "type": "main", "index": 0 }]] },
+          "Send to Telegram": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-TELEGRAM" }]
+}
