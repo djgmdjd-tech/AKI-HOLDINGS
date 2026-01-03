@@ -1,0 +1,55 @@
+{
+    "name": "AKI-FEEDBACK-LearningLoop",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-feedback",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "feedback-webhook",
+                  "name": "Feedback Receiver",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-feedback"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const feedback = $input.first().json.body || $input.first().json;\nconst structuredFeedback = {\n  feedback_id: 'FB-' + Date.now().toString(36).toUpperCase(),\n  timestamp: new Date().toISOString(),\n  source_agent: feedback.agent || 'unknown',\n  outcome: feedback.outcome || 'unknown',\n  outcome_score: feedback.score || 0,\n  expected_result: feedback.expected || '',\n  actual_result: feedback.actual || '',\n  error_type: feedback.error_type || null\n};\nreturn [{ json: structuredFeedback }];"
+                  },
+                  "id": "structure-feedback",
+                  "name": "Structure Feedback",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const feedback = $input.first().json;\nreturn [{ json: { ...feedback, learning_status: 'LOGGED', action_required: feedback.outcome === 'FAILURE' } }];"
+                  },
+                  "id": "process-feedback",
+                  "name": "Process Feedback",
+                  "type": "n8n-nodes-base.code",
+                  "position": [650, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "feedback-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [850, 300]
+          }
+    ],
+    "connections": {
+          "Feedback Receiver": { "main": [[{ "node": "Structure Feedback", "type": "main", "index": 0 }]] },
+          "Structure Feedback": { "main": [[{ "node": "Process Feedback", "type": "main", "index": 0 }]] },
+          "Process Feedback": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+                      "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-LEARNING" }]
+}
