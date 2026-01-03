@@ -1,0 +1,94 @@
+{
+    "name": "AKI-SCHEDULER-MarketMonitor",
+    "nodes": [
+          {
+                  "parameters": {
+                            "rule": {
+                                        "interval": [{ "field": "minutes", "minutesInterval": 15 }]
+                            }
+                  },
+                  "id": "market-trigger",
+                  "name": "Every 15 Minutes",
+                  "type": "n8n-nodes-base.scheduleTrigger",
+                  "position": [250, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-coingecko",
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "{\n  \"operation\": \"PRICE\",\n  \"coins\": \"bitcoin,ethereum,solana,matic-network\",\n  \"currencies\": \"usd\"\n}",
+                            "options": {}
+                  },
+                  "id": "fetch-prices",
+                  "name": "Fetch Prices",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const priceData = $input.first().json;\nconst store = $getWorkflowStaticData('global');\n\nif (!store.price_history) store.price_history = {};\nif (!store.last_prices) store.last_prices = {};\n\nconst alerts = [];\nconst timestamp = new Date().toISOString();\n\nif (priceData.data) {\n  Object.entries(priceData.data).forEach(([coin, data]) => {\n    const currentPrice = data.usd;\n    const lastPrice = store.last_prices[coin];\n    \n    if (lastPrice) {\n      const changePercent = ((currentPrice - lastPrice) / lastPrice) * 100;\n      \n      if (Math.abs(changePercent) > 3) {\n        alerts.push({\n          coin: coin,\n          type: changePercent > 0 ? 'SURGE' : 'DROP',\n          change: changePercent.toFixed(2) + '%',\n          price: currentPrice,\n          previous: lastPrice\n        });\n      }\n    }\n    \n    store.last_prices[coin] = currentPrice;\n    \n    if (!store.price_history[coin]) store.price_history[coin] = [];\n    store.price_history[coin].push({ price: currentPrice, timestamp: timestamp });\n    if (store.price_history[coin].length > 100) {\n      store.price_history[coin] = store.price_history[coin].slice(-100);\n    }\n  });\n}\n\nreturn [{\n  json: {\n    timestamp: timestamp,\n    prices: priceData.data,\n    alerts: alerts,\n    has_alerts: alerts.length > 0\n  }\n}];"
+                  },
+                  "id": "analyze-prices",
+                  "name": "Analyze Prices",
+                  "type": "n8n-nodes-base.code",
+                  "position": [650, 300]
+          },
+          {
+                  "parameters": {
+                            "conditions": {
+                                        "options": { "caseSensitive": true },
+                                        "conditions": [
+                                                      {
+                                                                      "leftValue": "={{ $json.has_alerts }}",
+                                                                      "rightValue": true,
+                                                                      "operator": { "type": "boolean", "operation": "equals" }
+                                                      }
+                                        ]
+                            }
+                  },
+                  "id": "check-alerts",
+                  "name": "Has Alerts?",
+                  "type": "n8n-nodes-base.if",
+                  "position": [850, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-notify",
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"level\": \"WARNING\",\n  \"title\": \"🚨 시장 급변동 감지\",\n  \"message\": \"Market alert triggered\",\n  \"details\": {{ JSON.stringify($json.alerts) }}\n}",
+                            "options": {}
+                  },
+                  "id": "send-alert",
+                  "name": "Send Alert",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [1050, 200]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "console.log('Market check complete, no significant changes');\nreturn [{ json: { logged: true, timestamp: new Date().toISOString() } }];"
+                  },
+                  "id": "log-normal",
+                  "name": "Log Normal",
+                  "type": "n8n-nodes-base.code",
+                  "position": [1050, 400]
+          }
+    ],
+    "connections": {
+          "Every 15 Minutes": { "main": [[{ "node": "Fetch Prices", "type": "main", "index": 0 }]] },
+          "Fetch Prices": { "main": [[{ "node": "Analyze Prices", "type": "main", "index": 0 }]] },
+          "Analyze Prices": { "main": [[{ "node": "Has Alerts?", "type": "main", "index": 0 }]] },
+          "Has Alerts?": {
+                  "main": [
+                            [{ "node": "Send Alert", "type": "main", "index": 0 }],
+                            [{ "node": "Log Normal", "type": "main", "index": 0 }]
+                  ]
+          }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-SCHEDULER" }, { "name": "AKI-MARKET" }]
+}
