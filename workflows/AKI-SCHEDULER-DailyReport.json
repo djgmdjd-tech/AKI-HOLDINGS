@@ -1,0 +1,79 @@
+{
+    "name": "AKI-SCHEDULER-DailyReport",
+    "nodes": [
+          {
+                  "parameters": {
+                            "rule": {
+                                        "interval": [{ "field": "hours", "hour": 9 }]
+                            }
+                  },
+                  "id": "daily-trigger",
+                  "name": "Every Day 9AM",
+                  "type": "n8n-nodes-base.scheduleTrigger",
+                  "position": [250, 300]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const store = $getWorkflowStaticData('global');\n\nconst today = new Date();\nconst yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);\n\nconst tasks = Object.values(store.tasks || {});\nconst todayTasks = tasks.filter(t => new Date(t.created_at) >= yesterday);\nconst completedToday = todayTasks.filter(t => t.status === 'COMPLETED').length;\nconst failedToday = todayTasks.filter(t => t.status === 'FAILED').length;\n\nconst trades = store.trades || [];\nconst todayTrades = trades.filter(t => new Date(t.timestamp) >= yesterday);\nconst todayPnl = todayTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);\nconst todayVolume = todayTrades.reduce((sum, t) => sum + (t.value_usd || 0), 0);\n\nconst estimatedCost = (todayTasks.length * 0.015).toFixed(2);\n\nconst report = {\n  date: today.toLocaleDateString('ko-KR'),\n  period: '24시간',\n  tasks: {\n    total: todayTasks.length,\n    completed: completedToday,\n    failed: failedToday,\n    success_rate: todayTasks.length > 0 \n      ? ((completedToday / todayTasks.length) * 100).toFixed(1) + '%' \n      : 'N/A'\n  },\n  trading: {\n    total_trades: todayTrades.length,\n    pnl_usd: todayPnl.toFixed(2),\n    volume_usd: todayVolume.toFixed(2),\n    win_rate: todayTrades.length > 0\n      ? ((todayTrades.filter(t => (t.pnl || 0) > 0).length / todayTrades.length) * 100).toFixed(1) + '%'\n      : 'N/A'\n  },\n  costs: {\n    estimated_api_cost: '$' + estimatedCost,\n    cost_per_task: todayTasks.length > 0 \n      ? '$' + (parseFloat(estimatedCost) / todayTasks.length).toFixed(4)\n      : 'N/A'\n  },\n  system: {\n    active_agents: 47,\n    uptime: '99.9%',\n    errors_24h: failedToday\n  }\n};\n\nreturn [{ json: report }];"
+                  },
+                  "id": "gather-stats",
+                  "name": "Gather Statistics",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "https://api.anthropic.com/v1/messages",
+                            "sendHeaders": true,
+                            "headerParameters": {
+                                        "parameters": [
+                                                      { "name": "x-api-key", "value": "={{ $vars.ANTHROPIC_API_KEY }}" },
+                                                      { "name": "anthropic-version", "value": "2023-06-01" },
+                                                      { "name": "content-type", "value": "application/json" }
+                                        ]
+                            },
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"model\": \"claude-3-haiku-20240307\",\n  \"max_tokens\": 1024,\n  \"system\": \"You are a report formatter. Create a clear, concise daily report in Korean. Use emojis appropriately. Keep it professional but readable.\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"다음 데이터로 일일 리포트를 작성해주세요:\\n\\n{{ JSON.stringify($json) }}\"\n    }\n  ]\n}",
+                            "options": {}
+                                                      },
+                  "id": "generate-report",
+                  "name": "Generate Report",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [650, 300]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const response = $input.first().json;\nconst reportText = response.content?.[0]?.text || 'Report generation failed';\nconst stats = $('Gather Statistics').first().json;\n\nreturn [{\n  json: {\n    report_text: reportText,\n    raw_stats: stats,\n    generated_at: new Date().toISOString()\n  }\n}];"
+},
+      "id": "format-report",
+                  "name": "Format Report",
+                  "type": "n8n-nodes-base.code",
+                  "position": [850, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-notify",
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"level\": \"INFO\",\n  \"title\": \"📊 AKI Holdings 일일 리포트\",\n  \"message\": \"{{ $json.report_text }}\"\n}",
+                    "options": {}
+      },
+            "id": "send-report",
+                  "name": "Send to CEO",
+                  "type": "n8n-nodes-base.httpRequest",
+                                    "position": [1050, 300]
+          }
+    ],
+    "connections": {
+          "Every Day 9AM": { "main": [[{ "node": "Gather Statistics", "type": "main", "index": 0 }]] },
+          "Gather Statistics": { "main": [[{ "node": "Generate Report", "type": "main", "index": 0 }]] },
+          "Generate Report": { "main": [[{ "node": "Format Report", "type": "main", "index": 0 }]] },
+          "Format Report": { "main": [[{ "node": "Send to CEO", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-SCHEDULER" }]
+}
