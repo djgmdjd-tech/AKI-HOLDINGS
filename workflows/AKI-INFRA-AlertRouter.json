@@ -1,0 +1,121 @@
+{
+    "name": "AKI-INFRA-AlertRouter",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-alert-router",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "alert-router-webhook",
+                  "name": "Alert Router Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-alert-router"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\n\nconst rules = {\n  CRITICAL: ['telegram', 'email', 'webhook'],\n  HIGH: ['telegram', 'webhook'],\n  MEDIUM: ['telegram'],\n  LOW: ['log_only'],\n  TRADE: ['telegram'],\n  ERROR: ['telegram', 'log'],\n  APPROVAL: ['telegram'],\n  INFO: ['log_only'],\n  SUCCESS: ['log_only']\n};\n\nconst alert = {\n  id: `ALERT-${Date.now().toString(36).toUpperCase()}`,\n  timestamp: new Date().toISOString(),\n  level: request.level || 'INFO',\n  type: request.type || 'GENERAL',\n  title: request.title || 'Alert',\n  message: request.message || '',\n  source: request.source || 'SYSTEM',\n  details: request.details || {},\n  channels: [],\n  delivery_status: {}\n};\n\nconst levelChannels = rules[alert.level] || ['log_only'];\nconst typeChannels = rules[alert.type] || [];\nalert.channels = [...new Set([...levelChannels, ...typeChannels])];\n\nconst store = $getWorkflowStaticData('global');\nif (!store.alert_history) {\n  store.alert_history = [];\n}\n\nconst fiveMinutesAgo = Date.now() - 300000;\nconst recentSimilar = store.alert_history.filter(a => \n  a.time > fiveMinutesAgo && \n  a.title === alert.title && \n  a.source === alert.source\n);\n\nif (recentSimilar.length >= 3) {\n  alert.suppressed = true;\n  alert.suppression_reason = 'Rate limited: 3+ similar alerts in 5 minutes';\n  alert.channels = ['log_only'];\n}\n\nstore.alert_history.push({\n  time: Date.now(),\n  title: alert.title,\n  source: alert.source,\n  level: alert.level\n});\n\nif (store.alert_history.length > 1000) {\n  store.alert_history = store.alert_history.slice(-1000);\n}\n\nreturn [{ json: alert }];"
+                  },
+                  "id": "route-alert",
+                  "name": "Route Alert",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "conditions": {
+                                        "options": { "caseSensitive": true },
+                                        "conditions": [
+                                                      {
+                                                                      "leftValue": "={{ $json.channels.includes('telegram') }}",
+                                                                      "rightValue": true,
+                                                                      "operator": { "type": "boolean", "operation": "equals" }
+                                                      }
+                                        ]
+                            }
+                  },
+                  "id": "should-telegram",
+                  "name": "Send Telegram?",
+                  "type": "n8n-nodes-base.if",
+                  "position": [650, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-notify",
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"level\": \"{{ $json.level }}\",\n  \"title\": \"{{ $json.title }}\",\n  \"message\": \"{{ $json.message }}\"\n}",
+                            "options": {}
+                  },
+                  "id": "send-telegram-alert",
+                  "name": "Send Telegram",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [850, 200]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const alert = $('Route Alert').first().json;\nalert.delivery_status.telegram = 'SENT';\nalert.delivery_status.timestamp = new Date().toISOString();\nreturn [{ json: alert }];"
+                  },
+                  "id": "update-telegram-status",
+                  "name": "Update Status",
+                  "type": "n8n-nodes-base.code",
+                  "position": [1050, 200]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-log",
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"level\": \"{{ $json.level }}\",\n  \"source\": \"ALERT_ROUTER\",\n  \"category\": \"alert\",\n  \"message\": \"{{ $json.title }}: {{ $json.message }}\",\n  \"details\": {{ JSON.stringify($json) }}\n}",
+        "options": {}
+},
+      "id": "log-alert",
+                  "name": "Log Alert",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [850, 400]
+          },
+          {
+                  "parameters": {
+                            "mode": "combine",
+                            "mergeByFields": {},
+                            "options": {}
+          },
+                  "id": "merge-alert-results",
+                  "name": "Merge Results",
+                  "type": "n8n-nodes-base.merge",
+                  "position": [1250, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify({ success: true, alert_id: $('Route Alert').first().json.id, channels: $('Route Alert').first().json.channels }) }}",
+                            "options": {}
+                  },
+                  "id": "alert-router-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [1450, 300]
+          }
+    ],
+    "connections": {
+          "Alert Router Request": { "main": [[{ "node": "Route Alert", "type": "main", "index": 0 }]] },
+          "Route Alert": { "main": [[{ "node": "Send Telegram?", "type": "main", "index": 0 }]] },
+          "Send Telegram?": {
+                  "main": [
+                            [{ "node": "Send Telegram", "type": "main", "index": 0 }],
+                            [{ "node": "Log Alert", "type": "main", "index": 0 }]
+                  ]
+          },
+          "Send Telegram": { "main": [[{ "node": "Update Status", "type": "main", "index": 0 }]] },
+          "Update Status": { "main": [[{ "node": "Merge Results", "type": "main", "index": 0 }]] },
+          "Log Alert": { "main": [[{ "node": "Merge Results", "type": "main", "index": 1 }]] },
+          "Merge Results": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+              "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-INFRA" }, { "name": "AKI-ALERTS" }]
+}
