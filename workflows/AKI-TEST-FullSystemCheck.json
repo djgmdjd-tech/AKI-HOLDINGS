@@ -1,0 +1,71 @@
+{
+    "name": "AKI-TEST-FullSystemCheck",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "GET",
+                            "path": "aki-system-test",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "test-webhook",
+                  "name": "Test Trigger",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-system-test"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const tests = [\n  { name: 'Event Bus', endpoint: '/webhook/aki-event-bus', method: 'POST', body: { target: 'EA-001', message: 'Test' } },\n  { name: 'EA-001 Manager', endpoint: '/webhook/aki-ea-001', method: 'POST', body: { message: 'Health check' } },\n  { name: 'Memory System', endpoint: '/webhook/aki-memory', method: 'POST', body: { operation: 'SET', key: 'test', value: 'hello' } },\n  { name: 'Task Tracker', endpoint: '/webhook/aki-task', method: 'POST', body: { operation: 'GET_STATS' } },\n  { name: 'CoinGecko API', endpoint: '/webhook/aki-coingecko', method: 'POST', body: { operation: 'PRICE', coins: 'bitcoin' } },\n  { name: 'Knowledge Base', endpoint: '/webhook/aki-knowledge', method: 'POST', body: { operation: 'GET_STATS' } }\n];\n\nreturn tests.map(t => ({ json: t }));"
+                  },
+                  "id": "prepare-tests",
+                  "name": "Prepare Tests",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "={{ $json.method }}",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}{{ $json.endpoint }}",
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={{ JSON.stringify($json.body) }}",
+                            "options": { "timeout": 30000 }
+                  },
+                  "id": "run-test",
+                  "name": "Run Test",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [650, 300],
+                  "continueOnFail": true
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const results = $input.all();\nconst tests = $('Prepare Tests').all();\n\nconst testResults = results.map((result, index) => {\n  const testInfo = tests[index].json;\n  const response = result.json;\n  const success = !response.error && !response.code && response.status !== 'error';\n  \n  return {\n    name: testInfo.name,\n    endpoint: testInfo.endpoint,\n    success: success,\n    status: success ? '✅ PASS' : '❌ FAIL',\n    response_preview: JSON.stringify(response).substring(0, 200)\n  };\n});\n\nconst passCount = testResults.filter(t => t.success).length;\nconst failCount = testResults.filter(t => !t.success).length;\n\nreturn [{\n  json: {\n    test_run_at: new Date().toISOString(),\n    total_tests: testResults.length,\n    passed: passCount,\n    failed: failCount,\n    success_rate: ((passCount / testResults.length) * 100).toFixed(1) + '%',\n    overall_status: failCount === 0 ? '✅ ALL SYSTEMS OPERATIONAL' : '⚠️ SOME SYSTEMS NEED ATTENTION',\n    results: testResults\n  }\n}];"
+                  },
+                  "id": "aggregate-results",
+                  "name": "Aggregate Results",
+                  "type": "n8n-nodes-base.code",
+                  "position": [850, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json, null, 2) }}",
+                            "options": {}
+                  },
+                  "id": "test-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [1050, 300]
+          }
+    ],
+    "connections": {
+          "Test Trigger": { "main": [[{ "node": "Prepare Tests", "type": "main", "index": 0 }]] },
+          "Prepare Tests": { "main": [[{ "node": "Run Test", "type": "main", "index": 0 }]] },
+          "Run Test": { "main": [[{ "node": "Aggregate Results", "type": "main", "index": 0 }]] },
+          "Aggregate Results": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+        "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-TEST" }]
+}
