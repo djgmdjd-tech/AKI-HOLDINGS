@@ -1,0 +1,45 @@
+{
+    "name": "AKI-MEMORY-RedisCore",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-memory",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "memory-webhook",
+                  "name": "Memory Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-memory"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\n\n// Memory operations: GET, SET, APPEND, LIST, DELETE\nconst operation = request.operation || 'GET';\nconst key = request.key || 'default';\nconst value = request.value || null;\nconst ttl = request.ttl || 3600; // 1 hour default\n\n// In-memory store simulation (replace with actual Redis in production)\n// For n8n, we'll use Static Data or external Redis via HTTP\n\nconst memoryStore = $getWorkflowStaticData('global');\n\nlet result = {};\n\nswitch (operation.toUpperCase()) {\n  case 'SET':\n    memoryStore[key] = {\n      value: value,\n      created_at: new Date().toISOString(),\n      expires_at: new Date(Date.now() + ttl * 1000).toISOString()\n    };\n    result = { success: true, operation: 'SET', key: key };\n    break;\n    \n  case 'GET':\n    const stored = memoryStore[key];\n    if (stored && new Date(stored.expires_at) > new Date()) {\n      result = { success: true, operation: 'GET', key: key, value: stored.value, created_at: stored.created_at };\n    } else {\n      result = { success: false, operation: 'GET', key: key, error: 'Key not found or expired' };\n    }\n    break;\n    \n  case 'APPEND':\n    if (!memoryStore[key]) {\n      memoryStore[key] = { value: [], created_at: new Date().toISOString(), expires_at: new Date(Date.now() + ttl * 1000).toISOString() };\n    }\n    if (Array.isArray(memoryStore[key].value)) {\n      memoryStore[key].value.push(value);\n      // Keep only last 100 items\n      if (memoryStore[key].value.length > 100) {\n        memoryStore[key].value = memoryStore[key].value.slice(-100);\n      }\n    }\n    result = { success: true, operation: 'APPEND', key: key, count: memoryStore[key].value.length };\n    break;\n    \n  case 'LIST':\n    const keys = Object.keys(memoryStore).filter(k => {\n      const item = memoryStore[k];\n      return item && new Date(item.expires_at) > new Date();\n    });\n    result = { success: true, operation: 'LIST', keys: keys, count: keys.length };\n    break;\n    \n  case 'DELETE':\n    delete memoryStore[key];\n    result = { success: true, operation: 'DELETE', key: key };\n    break;\n    \n  default:\n    result = { success: false, error: 'Unknown operation' };\n}\n\nresult.timestamp = new Date().toISOString();\n\nreturn [{ json: result }];"
+                  },
+                  "id": "memory-processor",
+                  "name": "Process Memory Request",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "memory-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Memory Request": { "main": [[{ "node": "Process Memory Request", "type": "main", "index": 0 }]] },
+          "Process Memory Request": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-MEMORY" }]
+}
