@@ -1,0 +1,45 @@
+{
+    "name": "AKI-MEMORY-SharedKnowledge",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-knowledge",
+                            "responseMode": "responseNode",
+              "options": {}
+                  },
+                  "id": "knowledge-webhook",
+                  "name": "Knowledge Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-knowledge"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\nconst operation = request.operation || 'SEARCH';\n\nconst knowledgeStore = $getWorkflowStaticData('global');\nif (!knowledgeStore.knowledge_base) {\n  knowledgeStore.knowledge_base = {\n    prompts: {},\n    learnings: [],\n    rules: {},\n    facts: {},\n    strategies: {}\n  };\n}\n\nconst kb = knowledgeStore.knowledge_base;\nlet result = {};\n\nswitch (operation.toUpperCase()) {\n  case 'ADD_PROMPT':\n    const promptId = request.prompt_id || `prompt_${Date.now()}`;\n    kb.prompts[promptId] = {\n      id: promptId,\n      name: request.name,\n      template: request.template,\n      category: request.category || 'general',\n      version: request.version || '1.0',\n      created_at: new Date().toISOString(),\n      usage_count: 0\n    };\n    result = { success: true, operation: 'ADD_PROMPT', prompt_id: promptId };\n    break;\n    \n  case 'GET_PROMPT':\n    const prompt = kb.prompts[request.prompt_id];\n    if (prompt) {\n      prompt.usage_count++;\n      result = { success: true, prompt: prompt };\n    } else {\n      result = { success: false, error: 'Prompt not found' };\n    }\n    break;\n    \n  case 'ADD_LEARNING':\n    kb.learnings.push({\n      id: `learn_${Date.now()}`,\n      source_agent: request.agent,\n      type: request.type,\n      context: request.context,\n      lesson: request.lesson,\n      confidence: request.confidence || 0.5,\n      created_at: new Date().toISOString()\n    });\n    if (kb.learnings.length > 500) {\n      kb.learnings = kb.learnings.slice(-500);\n    }\n    result = { success: true, operation: 'ADD_LEARNING', count: kb.learnings.length };\n    break;\n    \n  case 'SEARCH_LEARNINGS':\n    const searchType = request.type;\n    const searchAgent = request.agent;\n    let filtered = kb.learnings;\n    if (searchType) filtered = filtered.filter(l => l.type === searchType);\n    if (searchAgent) filtered = filtered.filter(l => l.source_agent === searchAgent);\n    result = { success: true, learnings: filtered.slice(-20) };\n    break;\n    \n  case 'SET_RULE':\n    const ruleId = request.rule_id || `rule_${Date.now()}`;\n    kb.rules[ruleId] = {\n      id: ruleId,\n      name: request.name,\n      condition: request.condition,\n      action: request.action,\n      priority: request.priority || 5,\n      active: true,\n      created_at: new Date().toISOString()\n    };\n    result = { success: true, operation: 'SET_RULE', rule_id: ruleId };\n    break;\n    \n  case 'GET_RULES':\n    const activeRules = Object.values(kb.rules).filter(r => r.active);\n    result = { success: true, rules: activeRules };\n    break;\n    \n  case 'ADD_STRATEGY':\n    const stratId = request.strategy_id || `strat_${Date.now()}`;\n    kb.strategies[stratId] = {\n      id: stratId,\n      name: request.name,\n      description: request.description,\n      parameters: request.parameters || {},\n      performance: { wins: 0, losses: 0, total_pnl: 0 },\n      active: true,\n      created_at: new Date().toISOString()\n    };\n    result = { success: true, operation: 'ADD_STRATEGY', strategy_id: stratId };\n    break;\n    \n  case 'UPDATE_STRATEGY_PERFORMANCE':\n    const strat = kb.strategies[request.strategy_id];\n    if (strat) {\n      if (request.win) strat.performance.wins++;\n      if (request.loss) strat.performance.losses++;\n      if (request.pnl) strat.performance.total_pnl += request.pnl;\n      strat.last_updated = new Date().toISOString();\n      result = { success: true, performance: strat.performance };\n    } else {\n      result = { success: false, error: 'Strategy not found' };\n    }\n    break;\n    \n  case 'GET_STATS':\n    result = {\n      success: true,\n      stats: {\n        prompts_count: Object.keys(kb.prompts).length,\n        learnings_count: kb.learnings.length,\n        rules_count: Object.keys(kb.rules).length,\n        strategies_count: Object.keys(kb.strategies).length\n      }\n    };\n    break;\n}\n\nresult.timestamp = new Date().toISOString();\nreturn [{ json: result }];"
+                  },
+                  "id": "knowledge-processor",
+                  "name": "Process Knowledge",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+},
+                  "id": "knowledge-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Knowledge Request": { "main": [[{ "node": "Process Knowledge", "type": "main", "index": 0 }]] },
+          "Process Knowledge": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-MEMORY" }, { "name": "AKI-KNOWLEDGE" }]
+}
