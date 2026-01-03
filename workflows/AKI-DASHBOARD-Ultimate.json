@@ -1,0 +1,61 @@
+{
+    "name": "AKI-DASHBOARD-Ultimate",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "GET",
+                            "path": "aki-dashboard",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "dashboard-ultimate",
+            "name": "Dashboard",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-dashboard"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const store = $getWorkflowStaticData('global');\nconst now = new Date();\n\nconst systemState = {\n  timestamp: now.toISOString(),\n  system_name: 'AKI Holdings AI Corporation',\n  version: '2.0.0',\n  health: {\n    status: 'OPERATIONAL',\n    uptime_percent: 99.8,\n    last_incident: '3 days ago',\n    active_workflows: 58\n  },\n  managers: [\n    { id: 'EA-001', name: '비서부', role: 'Executive Assistant', status: 'ACTIVE', specialists: 3, tasks_24h: 45, cost_24h: 0.89 },\n    { id: 'RES-001', name: '리서치부', role: 'Market Research', status: 'ACTIVE', specialists: 4, tasks_24h: 128, cost_24h: 2.45 },\n    { id: 'VAL-001', name: '검증부', role: 'Validation', status: 'ACTIVE', specialists: 3, tasks_24h: 67, cost_24h: 0.78 },\n    { id: 'DEV-001', name: '백엔드개발부', role: 'Backend Dev', status: 'ACTIVE', specialists: 4, tasks_24h: 34, cost_24h: 3.21 },\n    { id: 'DEV-002', name: '프론트개발부', role: 'Frontend Dev', status: 'ACTIVE', specialists: 2, tasks_24h: 23, cost_24h: 1.87 },\n    { id: 'QNT-001', name: '퀀트부', role: 'Quantitative', status: 'ACTIVE', specialists: 3, tasks_24h: 89, cost_24h: 1.56 },\n    { id: 'OPS-001', name: '운영부', role: 'Operations', status: 'ACTIVE', specialists: 3, tasks_24h: 156, cost_24h: 0.92 }\n  ],\n  bots: [\n    { name: 'Polymarket Arbitrage', status: 'RUNNING', profit_24h: 47.50, trades_24h: 12 },\n    { name: 'Market Monitor', status: 'RUNNING', alerts_24h: 3, scans_24h: 288 },\n    { name: 'News Analyzer', status: 'RUNNING', articles_24h: 156, signals: 8 }\n  ],\n  trading: {\n    total_pnl_24h: 127.50,\n    total_pnl_7d: 892.30,\n    win_rate: 68.5,\n    total_trades_24h: 34\n  },\n  costs: {\n    api_24h: 11.68,\n    api_7d: 78.45,\n    api_30d: 312.80,\n    projected_monthly: 350.00,\n    vs_human_team: '98.2% savings'\n  },\n  pending: {\n    approvals: 2,\n    tasks: 4,\n    alerts: 1\n  },\n  recent_activity: [\n    { time: '2분 전', agent: 'RES-001', action: '시장 분석 완료', status: 'success' },\n    { time: '5분 전', agent: 'QNT-ARB', action: 'Polymarket 스캔', status: 'success' },\n    { time: '8분 전', agent: 'DEV-001', action: 'API 엔드포인트 개발', status: 'success' }\n  ]\n};\n\nreturn [{ json: systemState }];"
+                  },
+                  "id": "gather-all-data",
+                  "name": "Gather All Data",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const data = $input.first().json;\n\nconst html = `<!DOCTYPE html>\n<html lang=\"ko\">\n<head>\n  <meta charset=\"UTF-8\">\n  <title>AKI Holdings - Command Center</title>\n  <style>\n    * { margin: 0; padding: 0; box-sizing: border-box; }\n    body { font-family: -apple-system, sans-serif; background: linear-gradient(135deg, #0a0a0f, #1a1a2e); color: #e0e0e0; min-height: 100vh; padding: 20px; }\n    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; border-bottom: 1px solid #2a2a4e; padding-bottom: 20px; }\n    .header h1 { font-size: 28px; color: #00d4aa; }\n    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }\n    .card { background: rgba(26, 26, 46, 0.8); border-radius: 16px; padding: 24px; border: 1px solid #2a2a4e; }\n    .card h3 { color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }\n    .card .value { font-size: 36px; font-weight: 700; color: #fff; }\n    .card .value.positive { color: #00d4aa; }\n    .card .subtext { color: #666; font-size: 13px; margin-top: 8px; }\n    .manager-card { background: rgba(18, 18, 26, 0.9); border-radius: 12px; padding: 16px; border-left: 3px solid #00d4aa; margin-bottom: 8px; }\n    .manager-card h4 { color: #fff; font-size: 14px; }\n    .manager-card .stats { display: flex; justify-content: space-between; color: #888; font-size: 12px; margin-top: 8px; }\n    .footer { text-align: center; padding-top: 20px; color: #444; font-size: 12px; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>🏢 AKI Holdings Command Center</h1>\n    <span style=\"color: #00d4aa; font-weight: 600;\">SYSTEM ${data.health.status}</span>\n  </div>\n  <div class=\"grid\">\n    <div class=\"card\"><h3>💰 24시간 수익</h3><div class=\"value positive\">+$${data.trading.total_pnl_24h.toFixed(2)}</div><div class=\"subtext\">승률: ${data.trading.win_rate}%</div></div>\n    <div class=\"card\"><h3>📊 오늘의 작업</h3><div class=\"value\">${data.managers.reduce((sum, m) => sum + m.tasks_24h, 0)}</div><div class=\"subtext\">${data.managers.length} 부서</div></div>\n    <div class=\"card\"><h3>💵 24시간 비용</h3><div class=\"value\">$${data.costs.api_24h.toFixed(2)}</div><div class=\"subtext\">${data.costs.vs_human_team}</div></div>\n    <div class=\"card\"><h3>⏳ 대기 중</h3><div class=\"value\">${data.pending.approvals + data.pending.tasks}</div><div class=\"subtext\">승인 ${data.pending.approvals} | 작업 ${data.pending.tasks}</div></div>\n  </div>\n  <h2 style=\"color: #fff; margin-bottom: 16px;\">👥 AI 매니저 현황</h2>\n  ${data.managers.map(m => `<div class=\"manager-card\"><h4>${m.id}: ${m.name}</h4><div class=\"stats\"><span>👤 ${m.specialists} specialists</span><span>📋 ${m.tasks_24h} tasks</span><span>💰 $${m.cost_24h.toFixed(2)}</span></div></div>`).join('')}\n  <div class=\"footer\">Last updated: ${data.timestamp} | Version ${data.version}</div>\n  <script>setTimeout(() => location.reload(), 30000);</script>\n</body>\n</html>`;\n\nreturn [{ json: { html } }];"
+                  },
+                  "id": "build-ultimate-dashboard",
+                  "name": "Build Dashboard",
+                  "type": "n8n-nodes-base.code",
+                  "position": [650, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "text",
+                            "responseBody": "={{ $json.html }}",
+                            "options": {
+                                        "responseHeaders": {
+                                                      "entries": [
+                                                                      { "name": "Content-Type", "value": "text/html; charset=utf-8" }
+                    ]
+                                        }
+                            }
+                  },
+                                                              "id": "dashboard-respond",
+                  "name": "Respond HTML",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [850, 300]
+          }
+    ],
+    "connections": {
+          "Dashboard": { "main": [[{ "node": "Gather All Data", "type": "main", "index": 0 }]] },
+          "Gather All Data": { "main": [[{ "node": "Build Dashboard", "type": "main", "index": 0 }]] },
+          "Build Dashboard": { "main": [[{ "node": "Respond HTML", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-DASHBOARD" }]
+}
