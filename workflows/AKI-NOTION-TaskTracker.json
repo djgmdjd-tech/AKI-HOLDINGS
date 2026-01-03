@@ -1,0 +1,45 @@
+{
+    "name": "AKI-NOTION-TaskTracker",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-task",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "task-webhook",
+                  "name": "Task Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-task"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\nconst operation = request.operation || 'CREATE';\n\nconst taskStore = $getWorkflowStaticData('global');\nif (!taskStore.tasks) taskStore.tasks = {};\n\nlet result = {};\n\nswitch (operation.toUpperCase()) {\n  case 'CREATE':\n    const taskId = `TSK-${Date.now().toString(36).toUpperCase()}`;\n    taskStore.tasks[taskId] = {\n      id: taskId,\n      title: request.title || 'Untitled Task',\n      description: request.description || '',\n      status: 'PENDING',\n      priority: request.priority || 'MEDIUM',\n      assigned_to: request.assigned_to || null,\n      created_by: request.created_by || 'SYSTEM',\n      parent_task: request.parent_task || null,\n      subtasks: [],\n      dependencies: request.dependencies || [],\n      estimated_cost: request.estimated_cost || 0,\n      actual_cost: 0,\n      created_at: new Date().toISOString(),\n      started_at: null,\n      completed_at: null,\n      result: null,\n      error: null\n    };\n    result = { success: true, operation: 'CREATE', task_id: taskId, task: taskStore.tasks[taskId] };\n    break;\n    \n  case 'UPDATE':\n    const task = taskStore.tasks[request.task_id];\n    if (task) {\n      if (request.status) {\n        task.status = request.status;\n        if (request.status === 'IN_PROGRESS' && !task.started_at) {\n          task.started_at = new Date().toISOString();\n        }\n        if (request.status === 'COMPLETED' || request.status === 'FAILED') {\n          task.completed_at = new Date().toISOString();\n        }\n      }\n      if (request.result) task.result = request.result;\n      if (request.error) task.error = request.error;\n      if (request.actual_cost) task.actual_cost = request.actual_cost;\n      task.updated_at = new Date().toISOString();\n      result = { success: true, operation: 'UPDATE', task: task };\n    } else {\n      result = { success: false, error: 'Task not found' };\n    }\n    break;\n    \n  case 'GET':\n    const getTask = taskStore.tasks[request.task_id];\n    if (getTask) {\n      result = { success: true, task: getTask };\n    } else {\n      result = { success: false, error: 'Task not found' };\n    }\n    break;\n    \n  case 'LIST':\n    let tasks = Object.values(taskStore.tasks);\n    if (request.status) tasks = tasks.filter(t => t.status === request.status);\n    if (request.assigned_to) tasks = tasks.filter(t => t.assigned_to === request.assigned_to);\n    if (request.priority) tasks = tasks.filter(t => t.priority === request.priority);\n    tasks.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));\n    result = { success: true, tasks: tasks.slice(0, 50), total: tasks.length };\n    break;\n    \n  case 'GET_STATS':\n    const allTasks = Object.values(taskStore.tasks);\n    const stats = {\n      total: allTasks.length,\n      pending: allTasks.filter(t => t.status === 'PENDING').length,\n      in_progress: allTasks.filter(t => t.status === 'IN_PROGRESS').length,\n      completed: allTasks.filter(t => t.status === 'COMPLETED').length,\n      failed: allTasks.filter(t => t.status === 'FAILED').length,\n      total_cost: allTasks.reduce((sum, t) => sum + (t.actual_cost || 0), 0)\n    };\n    result = { success: true, stats: stats };\n    break;\n}\n\nresult.timestamp = new Date().toISOString();\nreturn [{ json: result }];"
+                  },
+                  "id": "task-processor",
+                  "name": "Process Task",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+              "options": {}
+                  },
+                  "id": "task-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Task Request": { "main": [[{ "node": "Process Task", "type": "main", "index": 0 }]] },
+          "Process Task": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+},
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-NOTION" }, { "name": "AKI-TASKS" }]
+}
