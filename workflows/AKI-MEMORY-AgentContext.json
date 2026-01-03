@@ -1,0 +1,45 @@
+{
+    "name": "AKI-MEMORY-AgentContext",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-agent-context",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "context-webhook",
+                  "name": "Context Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-agent-context"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\nconst agentId = request.agent_id || 'unknown';\nconst operation = request.operation || 'GET';\n\nconst contextStore = $getWorkflowStaticData('global');\nconst contextKey = `agent_context_${agentId}`;\n\nlet result = {};\n\nswitch (operation.toUpperCase()) {\n  case 'UPDATE':\n    if (!contextStore[contextKey]) {\n      contextStore[contextKey] = {\n        agent_id: agentId,\n        created_at: new Date().toISOString(),\n        conversation_history: [],\n        working_memory: {},\n        task_queue: [],\n        completed_tasks: []\n      };\n    }\n    \n    if (request.conversation) {\n      contextStore[contextKey].conversation_history.push({\n        role: request.conversation.role,\n        content: request.conversation.content,\n        timestamp: new Date().toISOString()\n      });\n      if (contextStore[contextKey].conversation_history.length > 50) {\n        contextStore[contextKey].conversation_history = contextStore[contextKey].conversation_history.slice(-50);\n      }\n    }\n    \n    if (request.memory) {\n      contextStore[contextKey].working_memory = {\n        ...contextStore[contextKey].working_memory,\n        ...request.memory\n      };\n    }\n    \n    if (request.task) {\n      if (request.task.status === 'completed') {\n        contextStore[contextKey].completed_tasks.push(request.task);\n        if (contextStore[contextKey].completed_tasks.length > 100) {\n          contextStore[contextKey].completed_tasks = contextStore[contextKey].completed_tasks.slice(-100);\n        }\n      } else {\n        contextStore[contextKey].task_queue.push(request.task);\n      }\n    }\n    \n    contextStore[contextKey].last_updated = new Date().toISOString();\n    result = { success: true, operation: 'UPDATE', agent_id: agentId };\n    break;\n    \n  case 'GET':\n    const context = contextStore[contextKey];\n    if (context) {\n      result = { success: true, operation: 'GET', agent_id: agentId, context: context };\n    } else {\n      result = { success: false, error: 'No context found for agent' };\n    }\n    break;\n    \n  case 'GET_SUMMARY':\n    const ctx = contextStore[contextKey];\n    if (ctx) {\n      result = {\n        success: true,\n        agent_id: agentId,\n        summary: {\n          conversation_count: ctx.conversation_history?.length || 0,\n          memory_keys: Object.keys(ctx.working_memory || {}),\n          pending_tasks: ctx.task_queue?.length || 0,\n          completed_tasks: ctx.completed_tasks?.length || 0,\n          last_updated: ctx.last_updated\n        }\n      };\n    } else {\n      result = { success: false, error: 'No context found' };\n    }\n    break;\n    \n  case 'CLEAR':\n    delete contextStore[contextKey];\n    result = { success: true, operation: 'CLEAR', agent_id: agentId };\n    break;\n}\n\nresult.timestamp = new Date().toISOString();\nreturn [{ json: result }];"
+                  },
+                  "id": "context-processor",
+                  "name": "Process Context",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "context-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                          "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Context Request": { "main": [[{ "node": "Process Context", "type": "main", "index": 0 }]] },
+          "Process Context": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-MEMORY" }]
+}
