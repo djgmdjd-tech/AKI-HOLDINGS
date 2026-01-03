@@ -1,0 +1,68 @@
+{
+    "name": "AKI-API-Polymarket",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-polymarket",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "poly-webhook",
+                  "name": "Polymarket Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-polymarket"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\nconst operation = request.operation || 'MARKETS';\n\nlet apiUrl = 'https://clob.polymarket.com';\nlet method = 'GET';\nlet body = null;\n\nswitch (operation.toUpperCase()) {\n  case 'MARKETS':\n    apiUrl = 'https://gamma-api.polymarket.com/markets';\n    break;\n  case 'MARKET_DETAIL':\n    apiUrl = `https://gamma-api.polymarket.com/markets/${request.market_id}`;\n    break;\n  case 'ORDERBOOK':\n    apiUrl = 'https://clob.polymarket.com/book';\n    break;\n  case 'TRADES':\n    apiUrl = 'https://clob.polymarket.com/trades';\n    break;\n  case 'PRICES':\n    apiUrl = 'https://clob.polymarket.com/prices';\n    break;\n}\n\nreturn [{ \n  json: { \n    url: apiUrl, \n    method: method, \n    operation: operation,\n    params: request.params || {}\n  } \n}];"
+                  },
+                  "id": "build-poly-request",
+                  "name": "Build Request",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "={{ $json.method }}",
+                            "url": "={{ $json.url }}",
+                            "options": { "timeout": 15000 }
+                  },
+                  "id": "call-polymarket",
+                  "name": "Call Polymarket",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [650, 300],
+                  "continueOnFail": true
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const response = $input.first().json;\nconst operation = $('Build Request').first().json.operation;\n\nlet formattedData = {\n  source: 'Polymarket',\n  operation: operation,\n  timestamp: new Date().toISOString(),\n  success: !response.error,\n  data: response\n};\n\nif (operation === 'MARKETS' && Array.isArray(response)) {\n  formattedData.summary = {\n    total_markets: response.length,\n    sample_markets: response.slice(0, 5).map(m => ({\n      id: m.id,\n      question: m.question?.substring(0, 100),\n      volume: m.volume,\n      liquidity: m.liquidity\n    }))\n  };\n}\n\nif (operation === 'MARKETS' && Array.isArray(response)) {\n  const opportunities = [];\n  \n  response.forEach(market => {\n    if (market.outcomePrices) {\n      const prices = market.outcomePrices;\n      const total = prices.reduce((sum, p) => sum + parseFloat(p || 0), 0);\n      \n      if (total < 0.98 || total > 1.02) {\n        opportunities.push({\n          market_id: market.id,\n          question: market.question?.substring(0, 80),\n          price_sum: total.toFixed(4),\n          potential_arb: total < 0.98 ? 'BUY_ALL' : 'SELL_ALL',\n          spread: Math.abs(1 - total).toFixed(4)\n        });\n      }\n    }\n  });\n  \n  formattedData.arbitrage_opportunities = opportunities.slice(0, 10);\n}\n\nreturn [{ json: formattedData }];"
+                  },
+                  "id": "format-poly-response",
+                  "name": "Format Response",
+                  "type": "n8n-nodes-base.code",
+                  "position": [850, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "poly-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [1050, 300]
+          }
+    ],
+    "connections": {
+          "Polymarket Request": { "main": [[{ "node": "Build Request", "type": "main", "index": 0 }]] },
+          "Build Request": { "main": [[{ "node": "Call Polymarket", "type": "main", "index": 0 }]] },
+          "Call Polymarket": { "main": [[{ "node": "Format Response", "type": "main", "index": 0 }]] },
+          "Format Response": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-API" }, { "name": "AKI-POLYMARKET" }]
+}
