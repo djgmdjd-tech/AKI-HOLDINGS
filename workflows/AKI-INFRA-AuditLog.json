@@ -1,0 +1,45 @@
+{
+    "name": "AKI-INFRA-AuditLog",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-audit",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "audit-webhook",
+                  "name": "Audit Log Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-audit"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\nconst operation = request.operation || 'LOG';\n\nconst store = $getWorkflowStaticData('global');\nif (!store.audit_logs) {\n  store.audit_logs = [];\n}\n\nlet result = {};\n\nswitch (operation.toUpperCase()) {\n  case 'LOG':\n    const entry = {\n      id: `AUDIT-${Date.now().toString(36).toUpperCase()}`,\n      timestamp: new Date().toISOString(),\n      actor: request.actor || 'SYSTEM',\n      actor_type: request.actor_type || 'AGENT',\n      action: request.action || 'UNKNOWN',\n      action_type: request.action_type || 'OTHER',\n      resource_type: request.resource_type || 'UNKNOWN',\n      resource_id: request.resource_id || null,\n      description: request.description || '',\n      old_value: request.old_value || null,\n      new_value: request.new_value || null,\n      metadata: request.metadata || {},\n      ip_address: request.ip || null,\n      session_id: request.session_id || null,\n      correlation_id: request.correlation_id || null,\n      risk_level: request.risk_level || 'LOW',\n      requires_review: request.requires_review || false\n    };\n    store.audit_logs.push(entry);\n    if (store.audit_logs.length > 10000) {\n      store.audit_logs = store.audit_logs.slice(-10000);\n    }\n    result = { success: true, audit_id: entry.id };\n    break;\n  case 'QUERY':\n    let logs = [...store.audit_logs];\n    if (request.actor) logs = logs.filter(l => l.actor === request.actor);\n    if (request.action) logs = logs.filter(l => l.action === request.action);\n    if (request.action_type) logs = logs.filter(l => l.action_type === request.action_type);\n    if (request.resource_type) logs = logs.filter(l => l.resource_type === request.resource_type);\n    if (request.risk_level) logs = logs.filter(l => l.risk_level === request.risk_level);\n    if (request.from_date) logs = logs.filter(l => new Date(l.timestamp) >= new Date(request.from_date));\n    if (request.to_date) logs = logs.filter(l => new Date(l.timestamp) <= new Date(request.to_date));\n    logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));\n    const page = request.page || 1;\n    const limit = request.limit || 50;\n    const start = (page - 1) * limit;\n    result = { success: true, total: logs.length, page: page, limit: limit, logs: logs.slice(start, start + limit) };\n    break;\n  case 'GET_STATS':\n    const stats = { total_entries: store.audit_logs.length, by_action_type: {}, by_actor_type: {}, by_risk_level: {}, last_24h: 0, requiring_review: 0 };\n    const oneDayAgo = Date.now() - 86400000;\n    store.audit_logs.forEach(log => {\n      stats.by_action_type[log.action_type] = (stats.by_action_type[log.action_type] || 0) + 1;\n      stats.by_actor_type[log.actor_type] = (stats.by_actor_type[log.actor_type] || 0) + 1;\n      stats.by_risk_level[log.risk_level] = (stats.by_risk_level[log.risk_level] || 0) + 1;\n      if (new Date(log.timestamp).getTime() > oneDayAgo) stats.last_24h++;\n      if (log.requires_review) stats.requiring_review++;\n    });\n    result = { success: true, stats };\n    break;\n  case 'GET_PENDING_REVIEWS':\n    const pendingReviews = store.audit_logs.filter(l => l.requires_review).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 50);\n    result = { success: true, pending: pendingReviews, count: pendingReviews.length };\n    break;\n  case 'EXPORT':\n    let exportLogs = [...store.audit_logs];\n    if (request.from_date) exportLogs = exportLogs.filter(l => new Date(l.timestamp) >= new Date(request.from_date));\n    if (request.to_date) exportLogs = exportLogs.filter(l => new Date(l.timestamp) <= new Date(request.to_date));\n    result = { success: true, export_id: `EXPORT-${Date.now().toString(36)}`, count: exportLogs.length, data: exportLogs };\n    break;\n}\n\nresult.timestamp = new Date().toISOString();\nreturn [{ json: result }];"
+                  },
+                  "id": "audit-processor",
+                  "name": "Process Audit Log",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "audit-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Audit Log Request": { "main": [[{ "node": "Process Audit Log", "type": "main", "index": 0 }]] },
+          "Process Audit Log": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-INFRA" }, { "name": "AKI-AUDIT" }]
+}
