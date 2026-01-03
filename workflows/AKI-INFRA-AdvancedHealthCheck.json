@@ -1,0 +1,111 @@
+{
+    "name": "AKI-INFRA-AdvancedHealthCheck",
+    "nodes": [
+          {
+                  "parameters": {
+                            "rule": {
+                                        "interval": [{ "field": "minutes", "minutesInterval": 2 }]
+                            }
+                  },
+                  "id": "health-trigger",
+                  "name": "Every 2 Minutes",
+                  "type": "n8n-nodes-base.scheduleTrigger",
+                  "position": [250, 300]
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const checks = [\n  { name: 'Event Bus', endpoint: '/webhook/aki-event-bus', method: 'POST', body: { target: 'EA-001', message: 'health_check' }, type: 'INTERNAL' },\n  { name: 'Memory System', endpoint: '/webhook/aki-memory', method: 'POST', body: { operation: 'LIST' }, type: 'INTERNAL' },\n  { name: 'Config Manager', endpoint: '/webhook/aki-config', method: 'POST', body: { operation: 'GET', section: 'system' }, type: 'INTERNAL' },\n  { name: 'Circuit Breaker', endpoint: '/webhook/aki-circuit-breaker', method: 'POST', body: { operation: 'LIST_ALL' }, type: 'INTERNAL' },\n  { name: 'Metrics', endpoint: '/webhook/aki-metrics', method: 'POST', body: { operation: 'GET_DASHBOARD' }, type: 'INTERNAL' },\n  { name: 'CoinGecko API', url: 'https://api.coingecko.com/api/v3/ping', method: 'GET', type: 'EXTERNAL' },\n  { name: 'Binance API', url: 'https://api.binance.com/api/v3/ping', method: 'GET', type: 'EXTERNAL' },\n  { name: 'Anthropic API', endpoint: '/webhook/aki-rate-limiter', method: 'POST', body: { operation: 'GET_STATS', resource_id: 'anthropic_api' }, type: 'INTERNAL' }\n];\n\nreturn checks.map(check => ({ json: check }));"
+                  },
+                  "id": "prepare-health-checks",
+                  "name": "Prepare Checks",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "={{ $json.method }}",
+                            "url": "={{ $json.url || ($vars.N8N_WEBHOOK_BASE_URL + $json.endpoint) }}",
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={{ $json.body ? JSON.stringify($json.body) : '{}' }}",
+                            "options": { "timeout": 10000 }
+                  },
+                  "id": "execute-health-check",
+                  "name": "Execute Check",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [650, 300],
+                  "continueOnFail": true
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const results = $input.all();\nconst checks = $('Prepare Checks').all();\nconst now = new Date();\nconst healthResults = [];\n\nresults.forEach((result, index) => {\n  const check = checks[index].json;\n  const response = result.json;\n  const isHealthy = !response.error && !response.code && response.statusCode !== 500;\n  const responseTime = result.json.$response?.responseTime || null;\n  healthResults.push({\n    name: check.name,\n    type: check.type,\n    status: isHealthy ? 'HEALTHY' : 'UNHEALTHY',\n    response_time_ms: responseTime,\n    checked_at: now.toISOString(),\n    error: isHealthy ? null : (response.error || response.message || 'Unknown error')\n  });\n});\n\nconst healthyCount = healthResults.filter(r => r.status === 'HEALTHY').length;\nconst totalCount = healthResults.length;\nconst healthPercent = (healthyCount / totalCount * 100).toFixed(1);\n\nlet overallStatus = 'HEALTHY';\nif (healthPercent < 100) overallStatus = 'DEGRADED';\nif (healthPercent < 80) overallStatus = 'UNHEALTHY';\nif (healthPercent < 50) overallStatus = 'CRITICAL';\n\nconst internalHealth = healthResults.filter(r => r.type === 'INTERNAL');\nconst externalHealth = healthResults.filter(r => r.type === 'EXTERNAL');\n\nconst report = {\n  report_id: `HEALTH-${Date.now().toString(36).toUpperCase()}`,\n  timestamp: now.toISOString(),\n  overall: { status: overallStatus, health_percent: healthPercent + '%', healthy_services: healthyCount, total_services: totalCount },\n  internal_services: { healthy: internalHealth.filter(r => r.status === 'HEALTHY').length, total: internalHealth.length, details: internalHealth },\n  external_apis: { healthy: externalHealth.filter(r => r.status === 'HEALTHY').length, total: externalHealth.length, details: externalHealth },\n  unhealthy_services: healthResults.filter(r => r.status === 'UNHEALTHY'),\n  avg_response_time_ms: healthResults.filter(r => r.response_time_ms).reduce((sum, r) => sum + r.response_time_ms, 0) / healthResults.filter(r => r.response_time_ms).length || 0\n};\n\nreturn [{ json: report }];"
+                  },
+                  "id": "aggregate-health",
+                  "name": "Aggregate Health",
+                  "type": "n8n-nodes-base.code",
+                  "position": [850, 300]
+          },
+          {
+                  "parameters": {
+                            "conditions": {
+                                        "options": { "caseSensitive": true },
+                                        "conditions": [
+                                                      {
+                                                                      "leftValue": "={{ $json.overall.status }}",
+                                                                      "rightValue": "HEALTHY",
+                                                                      "operator": { "type": "string", "operation": "notEquals" }
+                                                      }
+                                        ]
+                            }
+                  },
+                  "id": "check-unhealthy",
+                  "name": "Unhealthy?",
+                  "type": "n8n-nodes-base.if",
+                  "position": [1050, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-alert-router",
+                    "sendBody": true,
+                    "specifyBody": "json",
+                    "jsonBody": "={\n  \"level\": \"{{ $json.overall.status === 'CRITICAL' ? 'CRITICAL' : 'HIGH' }}\",\n  \"type\": \"ERROR\",\n  \"title\": \"System Health Alert\",\n  \"message\": \"Status: {{ $json.overall.status }} - Healthy: {{ $json.overall.healthy_services }}/{{ $json.overall.total_services }}\",\n  \"source\": \"HEALTH_CHECK\",\n  \"details\": {{ JSON.stringify($json) }}\n}",
+        "options": {}
+},
+      "id": "alert-unhealthy",
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1250, 200]
+},
+    {
+      "parameters": {
+                "method": "POST",
+                "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-metrics",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"operation\": \"GAUGE\",\n  \"name\": \"system_health\",\n  \"value\": {{ parseFloat($json.overall.health_percent) }}\n}",
+                "options": {}
+      },
+            "id": "record-health-metric",
+            "name": "Record Metric",
+            "type": "n8n-nodes-base.httpRequest",
+            "position": [1250, 400]
+    }
+    ],
+    "connections": {
+          "Every 2 Minutes": { "main": [[{ "node": "Prepare Checks", "type": "main", "index": 0 }]] },
+          "Prepare Checks": { "main": [[{ "node": "Execute Check", "type": "main", "index": 0 }]] },
+          "Execute Check": { "main": [[{ "node": "Aggregate Health", "type": "main", "index": 0 }]] },
+          "Aggregate Health": { "main": [[{ "node": "Unhealthy?", "type": "main", "index": 0 }]] },
+          "Unhealthy?": {
+                  "main": [
+                            [{ "node": "Send Alert", "type": "main", "index": 0 }],
+                            [{ "node": "Record Metric", "type": "main", "index": 0 }]
+                  ]
+          },
+          "Send Alert": { "main": [[{ "node": "Record Metric", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-INFRA" }, { "name": "AKI-HEALTH" }]
+}
