@@ -1,0 +1,45 @@
+{
+    "name": "AKI-INFRA-SchedulerManager",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-scheduler-manager",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "scheduler-webhook",
+                  "name": "Scheduler Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-scheduler-manager"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\nconst operation = request.operation || 'LIST';\n\nconst store = $getWorkflowStaticData('global');\nif (!store.scheduled_jobs) {\n  store.scheduled_jobs = {};\n}\n\nlet result = {};\n\nswitch (operation.toUpperCase()) {\n  case 'REGISTER':\n    const jobId = request.job_id || `JOB-${Date.now().toString(36).toUpperCase()}`;\n    store.scheduled_jobs[jobId] = {\n      id: jobId,\n      name: request.name || 'Unnamed Job',\n      description: request.description || '',\n      schedule: request.schedule || '*/5 * * * *',\n      endpoint: request.endpoint,\n      payload: request.payload || {},\n      enabled: request.enabled !== false,\n      created_at: new Date().toISOString(),\n      last_run: null,\n      next_run: null,\n      run_count: 0,\n      success_count: 0,\n      failure_count: 0,\n      last_status: null,\n      last_error: null\n    };\n    result = { success: true, job_id: jobId, registered: true };\n    break;\n  case 'UPDATE':\n    const updateJob = store.scheduled_jobs[request.job_id];\n    if (updateJob) {\n      if (request.name) updateJob.name = request.name;\n      if (request.schedule) updateJob.schedule = request.schedule;\n      if (request.endpoint) updateJob.endpoint = request.endpoint;\n      if (request.payload) updateJob.payload = request.payload;\n      if (request.enabled !== undefined) updateJob.enabled = request.enabled;\n      updateJob.updated_at = new Date().toISOString();\n      result = { success: true, job_id: request.job_id, updated: true };\n    } else {\n      result = { success: false, error: 'Job not found' };\n    }\n    break;\n  case 'DELETE':\n    if (store.scheduled_jobs[request.job_id]) {\n      delete store.scheduled_jobs[request.job_id];\n      result = { success: true, job_id: request.job_id, deleted: true };\n    } else {\n      result = { success: false, error: 'Job not found' };\n    }\n    break;\n  case 'ENABLE':\n    const enableJob = store.scheduled_jobs[request.job_id];\n    if (enableJob) {\n      enableJob.enabled = true;\n      result = { success: true, job_id: request.job_id, enabled: true };\n    } else {\n      result = { success: false, error: 'Job not found' };\n    }\n    break;\n  case 'DISABLE':\n    const disableJob = store.scheduled_jobs[request.job_id];\n    if (disableJob) {\n      disableJob.enabled = false;\n      result = { success: true, job_id: request.job_id, disabled: true };\n    } else {\n      result = { success: false, error: 'Job not found' };\n    }\n    break;\n  case 'RUN_NOW':\n    const runJob = store.scheduled_jobs[request.job_id];\n    if (runJob) {\n      runJob.run_now = true;\n      runJob.run_now_requested_at = new Date().toISOString();\n      result = { success: true, job_id: request.job_id, queued: true };\n    } else {\n      result = { success: false, error: 'Job not found' };\n    }\n    break;\n  case 'RECORD_RUN':\n    const recordJob = store.scheduled_jobs[request.job_id];\n    if (recordJob) {\n      recordJob.run_count++;\n      recordJob.last_run = new Date().toISOString();\n      recordJob.last_status = request.status || 'UNKNOWN';\n      recordJob.last_duration_ms = request.duration_ms;\n      if (request.status === 'SUCCESS') {\n        recordJob.success_count++;\n        recordJob.last_error = null;\n      } else {\n        recordJob.failure_count++;\n        recordJob.last_error = request.error;\n      }\n      result = { success: true, recorded: true };\n    } else {\n      result = { success: false, error: 'Job not found' };\n    }\n    break;\n  case 'LIST':\n    const jobs = Object.values(store.scheduled_jobs).map(job => ({\n      id: job.id,\n      name: job.name,\n      schedule: job.schedule,\n      enabled: job.enabled,\n      last_run: job.last_run,\n      last_status: job.last_status,\n      run_count: job.run_count,\n      success_rate: job.run_count > 0 ? ((job.success_count / job.run_count) * 100).toFixed(1) + '%' : 'N/A'\n    }));\n    result = { success: true, jobs: jobs, total: jobs.length };\n    break;\n  case 'GET':\n    const getJob = store.scheduled_jobs[request.job_id];\n    if (getJob) {\n      result = { success: true, job: getJob };\n    } else {\n      result = { success: false, error: 'Job not found' };\n    }\n    break;\n  case 'GET_STATS':\n    const allJobs = Object.values(store.scheduled_jobs);\n    result = {\n      success: true,\n      stats: {\n        total_jobs: allJobs.length,\n        enabled: allJobs.filter(j => j.enabled).length,\n        disabled: allJobs.filter(j => !j.enabled).length,\n        total_runs: allJobs.reduce((sum, j) => sum + j.run_count, 0),\n        total_successes: allJobs.reduce((sum, j) => sum + j.success_count, 0),\n        total_failures: allJobs.reduce((sum, j) => sum + j.failure_count, 0),\n        overall_success_rate: allJobs.reduce((sum, j) => sum + j.run_count, 0) > 0\n          ? ((allJobs.reduce((sum, j) => sum + j.success_count, 0) / allJobs.reduce((sum, j) => sum + j.run_count, 0)) * 100).toFixed(1) + '%'\n          : 'N/A'\n      }\n    };\n    break;\n}\n\nresult.timestamp = new Date().toISOString();\nreturn [{ json: result }];"
+                  },
+                  "id": "scheduler-processor",
+                  "name": "Process Scheduler",
+                  "type": "n8n-nodes-base.code",
+            "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                    "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "scheduler-respond",
+                  "name": "Respond",
+                          "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+        "connections": {
+              "Scheduler Request": { "main": [[{ "node": "Process Scheduler", "type": "main", "index": 0 }]] },
+              "Process Scheduler": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+        },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-INFRA" }, { "name": "AKI-SCHEDULER" }]
+}
