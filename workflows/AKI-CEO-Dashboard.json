@@ -1,0 +1,45 @@
+{
+    "name": "AKI-CEO-Dashboard",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "GET",
+                            "path": "aki-ceo-dashboard",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "dashboard-webhook",
+                  "name": "Dashboard Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-ceo-dashboard"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const now = new Date();\nconst systemState = {\n  timestamp: now.toISOString(),\n  uptime_days: 47,\n  overall_health: 'HEALTHY',\n  health_percent: 99.2,\n  managers: [\n    { id: 'EA-001', name: 'Executive', status: 'ACTIVE', tasks_today: 23, cost_today: 0.45 },\n    { id: 'RES-001', name: 'Research', status: 'ACTIVE', tasks_today: 15, cost_today: 1.20 },\n    { id: 'VAL-001', name: 'Validation', status: 'ACTIVE', tasks_today: 8, cost_today: 0.35 },\n    { id: 'DEV-001', name: 'Backend', status: 'ACTIVE', tasks_today: 12, cost_today: 2.10 },\n    { id: 'DEV-002', name: 'Frontend', status: 'ACTIVE', tasks_today: 9, cost_today: 1.80 },\n    { id: 'QNT-001', name: 'Quant', status: 'ACTIVE', tasks_today: 6, cost_today: 0.95 },\n    { id: 'OPS-001', name: 'Operations', status: 'ACTIVE', tasks_today: 31, cost_today: 0.55 }\n  ],\n  active_specialists: 47,\n  today: { total_tasks: 104, completed: 98, failed: 2, pending: 4, total_cost_usd: 7.40, tokens_used: 285000 }\n};\nreturn [{ json: systemState }];"
+                  },
+                  "id": "gather-state",
+                  "name": "Gather System State",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "respond-json",
+                  "name": "Respond JSON",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Dashboard Request": { "main": [[{ "node": "Gather System State", "type": "main", "index": 0 }]] },
+          "Gather System State": { "main": [[{ "node": "Respond JSON", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-CEO" }]
+                  }
