@@ -1,0 +1,226 @@
+{
+    "name": "AKI-INFRA-RetryProcessor",
+    "nodes": [
+          {
+                  "parameters": {
+                            "rule": {
+                      "interval": [{ "field": "seconds", "secondsInterval": 10 }]
+                            }
+                  },
+                  "id": "retry-trigger",
+                  "name": "Every 10 Seconds",
+                  "type": "n8n-nodes-base.scheduleTrigger",
+                  "position": [250, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-retry-queue",
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "{\"operation\": \"GET_NEXT\"}",
+                            "options": {}
+                  },
+                  "id": "get-next-retry",
+                  "name": "Get Next Retry Item",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "conditions": {
+                                        "options": { "caseSensitive": true },
+                                        "conditions": [
+                                                      {
+                                                                      "leftValue": "={{ $json.found }}",
+                                                                      "rightValue": true,
+                                                                      "operator": { "type": "boolean", "operation": "equals" }
+                                                      }
+                                        ]
+                            }
+                  },
+                  "id": "has-retry-item",
+                  "name": "Has Item?",
+                  "type": "n8n-nodes-base.if",
+                  "position": [650, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-circuit-breaker",
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"operation\": \"CHECK\",\n  \"service_id\": \"{{ $json.item.target_endpoint }}\"\n}",
+                            "options": {}
+                  },
+                  "id": "check-circuit",
+                  "name": "Check Circuit Breaker",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [850, 200]
+          },
+          {
+                  "parameters": {
+                            "conditions": {
+                                        "options": { "caseSensitive": true },
+                                        "conditions": [
+                                                      {
+                                                                      "leftValue": "={{ $json.allowed }}",
+                                                                      "rightValue": true,
+                                                                      "operator": { "type": "boolean", "operation": "equals" }
+                                                      }
+                                        ]
+                            }
+                  },
+                  "id": "circuit-allowed",
+                  "name": "Circuit Allows?",
+                  "type": "n8n-nodes-base.if",
+                  "position": [1050, 200]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}{{ $('Get Next Retry Item').first().json.item.target_endpoint }}",
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={{ JSON.stringify($('Get Next Retry Item').first().json.item.payload) }}",
+                            "options": { "timeout": 30000 }
+                  },
+                  "id": "execute-retry",
+                  "name": "Execute Retry",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [1250, 100],
+                  "continueOnFail": true
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const response = $input.first().json;\nconst item = $('Get Next Retry Item').first().json.item;\nconst success = !response.error && !response.code && response.status !== 'error';\nreturn [{\n  json: {\n    item_id: item.id,\n    target_endpoint: item.target_endpoint,\n    success: success,\n    response: response,\n    error: success ? null : (response.error || response.message || 'Unknown error')\n  }\n}];"
+                  },
+                  "id": "check-retry-result",
+                  "name": "Check Result",
+                  "type": "n8n-nodes-base.code",
+                  "position": [1450, 100]
+          },
+          {
+                  "parameters": {
+                            "conditions": {
+                                        "options": { "caseSensitive": true },
+                                        "conditions": [
+                                                      {
+                                                                      "leftValue": "={{ $json.success }}",
+                                                                      "rightValue": true,
+                                                                      "operator": { "type": "boolean", "operation": "equals" }
+                                                      }
+                                        ]
+                            }
+                  },
+                  "id": "retry-success",
+                  "name": "Retry Success?",
+                  "type": "n8n-nodes-base.if",
+                  "position": [1650, 100]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-retry-queue",
+                    "sendBody": true,
+                    "specifyBody": "json",
+                    "jsonBody": "={\n  \"operation\": \"MARK_SUCCESS\",\n  \"item_id\": \"{{ $json.item_id }}\"\n}",
+                    "options": {}
+          },
+            "id": "mark-success",
+            "name": "Mark Success",
+            "type": "n8n-nodes-base.httpRequest",
+            "position": [1850, 0]
+      },
+          {
+                  "parameters": {
+                            "method": "POST",
+                      "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-circuit-breaker",
+                    "sendBody": true,
+                    "specifyBody": "json",
+                            "jsonBody": "={\n  \"operation\": \"SUCCESS\",\n  \"service_id\": \"{{ $json.target_endpoint }}\"\n}",
+                            "options": {}
+                  },
+                  "id": "record-cb-success",
+                  "name": "Record CB Success",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [2050, 0]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-retry-queue",
+                    "sendBody": true,
+                    "specifyBody": "json",
+                            "jsonBody": "={\n  \"operation\": \"MARK_FAILURE\",\n  \"item_id\": \"{{ $json.item_id }}\",\n  \"error\": \"{{ $json.error }}\"\n}",
+        "options": {}
+},
+      "id": "mark-failure",
+      "name": "Mark Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1850, 200]
+},
+    {
+            "parameters": {
+                      "method": "POST",
+                      "url": "={{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-circuit-breaker",
+              "sendBody": true,
+              "specifyBody": "json",
+              "jsonBody": "={\n  \"operation\": \"FAILURE\",\n  \"service_id\": \"{{ $json.target_endpoint }}\"\n}",
+              "options": {}
+    },
+      "id": "record-cb-failure",
+      "name": "Record CB Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [2050, 200]
+},
+    {
+            "parameters": {
+                      "jsCode": "const item = $('Get Next Retry Item').first().json.item;\nconsole.log(`Circuit breaker OPEN for ${item.target_endpoint}, skipping retry`);\nreturn [{ json: { skipped: true, reason: 'Circuit breaker open' } }];"
+            },
+            "id": "skip-retry",
+            "name": "Skip (Circuit Open)",
+            "type": "n8n-nodes-base.code",
+            "position": [1250, 300]
+    },
+    {
+            "parameters": {
+                      "jsCode": "return [{ json: { status: 'idle', timestamp: new Date().toISOString() } }];"
+            },
+            "id": "no-retry-items",
+            "name": "No Items",
+            "type": "n8n-nodes-base.code",
+            "position": [850, 400]
+    }
+],
+  "connections": {
+        "Every 10 Seconds": { "main": [[{ "node": "Get Next Retry Item", "type": "main", "index": 0 }]] },
+        "Get Next Retry Item": { "main": [[{ "node": "Has Item?", "type": "main", "index": 0 }]] },
+        "Has Item?": {
+                "main": [
+                          [{ "node": "Check Circuit Breaker", "type": "main", "index": 0 }],
+                          [{ "node": "No Items", "type": "main", "index": 0 }]
+                ]
+        },
+        "Check Circuit Breaker": { "main": [[{ "node": "Circuit Allows?", "type": "main", "index": 0 }]] },
+        "Circuit Allows?": {
+                "main": [
+                          [{ "node": "Execute Retry", "type": "main", "index": 0 }],
+                          [{ "node": "Skip (Circuit Open)", "type": "main", "index": 0 }]
+                ]
+        },
+        "Execute Retry": { "main": [[{ "node": "Check Result", "type": "main", "index": 0 }]] },
+        "Check Result": { "main": [[{ "node": "Retry Success?", "type": "main", "index": 0 }]] },
+        "Retry Success?": {
+                "main": [
+                          [{ "node": "Mark Success", "type": "main", "index": 0 }],
+                          [{ "node": "Mark Failure", "type": "main", "index": 0 }]
+                ]
+        },
+        "Mark Success": { "main": [[{ "node": "Record CB Success", "type": "main", "index": 0 }]] },
+        "Mark Failure": { "main": [[{ "node": "Record CB Failure", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "AKI-INFRA" }, { "name": "AKI-RESILIENCE" }]
+}
