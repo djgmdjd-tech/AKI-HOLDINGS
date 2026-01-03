@@ -1,0 +1,60 @@
+{
+    "name": "AKI-TELEGRAM-Bot",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-telegram-webhook",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "telegram-webhook",
+                  "name": "Telegram Webhook",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-telegram-webhook"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const update = $input.first().json;\n\nconst message = update.message || update.callback_query?.message;\nconst chatId = message?.chat?.id || update.callback_query?.message?.chat?.id;\nconst text = message?.text || '';\nconst callbackData = update.callback_query?.data;\nconst userId = message?.from?.id || update.callback_query?.from?.id;\nconst username = message?.from?.username || update.callback_query?.from?.username;\n\nlet command = null;\nlet args = [];\n\nif (text.startsWith('/')) {\n  const parts = text.split(' ');\n  command = parts[0].substring(1).toLowerCase();\n  args = parts.slice(1);\n}\n\nlet responseText = '';\nlet replyMarkup = null;\n\nswitch (command) {\n  case 'start':\n    responseText = `🏢 *AKI Holdings Command Center*\\n\\nWelcome, ${username}!\\n\\n사용 가능한 명령어:\\n/status - 시스템 상태\\n/tasks - 작업 현황\\n/trades - 최근 거래\\n/approve - 승인 대기 목록\\n/report - 일일 리포트\\n/help - 도움말`;\n    break;\n    \n  case 'status':\n    responseText = `📊 *시스템 상태*\\n\\n✅ Overall: HEALTHY\\n⏱ Uptime: 47d 12h\\n👥 Active Agents: 47\\n💰 Today Cost: $7.40\\n📈 Tasks Today: 104/98 completed`;\n    replyMarkup = {\n      inline_keyboard: [\n        [{ text: '🔄 새로고침', callback_data: 'refresh_status' }],\n        [{ text: '📋 상세보기', callback_data: 'detail_status' }]\n      ]\n    };\n    break;\n    \n  case 'tasks':\n    responseText = `📋 *작업 현황*\\n\\n🔵 Pending: 4\\n🟡 In Progress: 8\\n🟢 Completed: 98\\n🔴 Failed: 2\\n\\n최근 작업:\\n• RES-001: 시장 분석 (진행중)\\n• DEV-001: API 개발 (완료)\\n• QNT-001: 리스크 계산 (완료)`;\n    break;\n    \n  case 'trades':\n    responseText = `💹 *최근 거래*\\n\\n📈 Total PnL: +$127.50\\n📊 Win Rate: 68%\\n📉 Trades Today: 12\\n\\n최근 거래:\\n• BTC/USDT SELL +$45.20\\n• ETH/USDT BUY -$12.30\\n• POLY-Market +$28.00`;\n    break;\n    \n  case 'approve':\n    responseText = `⏳ *승인 대기*\\n\\n1. 🤖 *Polymarket 봇 v2.3*\\n   비용: $4.50 | 우선순위: HIGH\\n\\n2. 📊 *신규 DeFi 전략*\\n   비용: $0 | 우선순위: MEDIUM`;\n    replyMarkup = {\n      inline_keyboard: [\n        [{ text: '✅ 봇 승인', callback_data: 'approve_bot' }, { text: '❌ 거부', callback_data: 'reject_bot' }],\n        [{ text: '✅ 전략 승인', callback_data: 'approve_strategy' }, { text: '❌ 거부', callback_data: 'reject_strategy' }]\n      ]\n    };\n    break;\n    \n  case 'report':\n    responseText = `📑 *일일 리포트*\\n\\n📅 ${new Date().toLocaleDateString('ko-KR')}\\n\\n💰 *비용*\\nAPI 호출: $7.40\\n인프라: $0.50\\n총계: $7.90\\n\\n📊 *성과*\\n완료 작업: 98건\\n성공률: 96%\\n평균 응답: 2.3초\\n\\n💹 *거래*\\nPnL: +$127.50\\n거래수: 12건`;\n    break;\n    \n  case 'help':\n    responseText = `❓ *도움말*\\n\\n/status - 전체 시스템 상태\\n/tasks - 작업 현황 조회\\n/trades - 거래 내역 조회\\n/approve - 승인 대기 항목\\n/report - 일일 리포트\\n/agent [id] - 에이전트 상태\\n/execute [task] - 작업 실행\\n/stop [id] - 작업 중지`;\n    break;\n    \n  default:\n    if (callbackData) {\n      switch (callbackData) {\n        case 'refresh_status':\n          responseText = '🔄 상태 새로고침 완료!';\n          break;\n        case 'approve_bot':\n          responseText = '✅ Polymarket 봇 v2.3 승인됨!';\n          break;\n        case 'reject_bot':\n          responseText = '❌ Polymarket 봇 v2.3 거부됨.';\n          break;\n        default:\n          responseText = '처리 완료!';\n      }\n    } else if (text) {\n      responseText = `🤖 명령어를 인식하지 못했습니다.\\n/help 를 입력하여 사용 가능한 명령어를 확인하세요.`;\n    }\n}\n\nreturn [{\n  json: {\n    chat_id: chatId,\n    text: responseText,\n    parse_mode: 'Markdown',\n    reply_markup: replyMarkup,\n    original_command: command,\n    user_id: userId,\n    username: username\n  }\n}];"
+                  },
+                  "id": "process-telegram",
+                  "name": "Process Command",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/sendMessage",
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"chat_id\": {{ $json.chat_id }},\n  \"text\": \"{{ $json.text }}\",\n  \"parse_mode\": \"{{ $json.parse_mode }}\"\n}",
+                    "options": {}
+          },
+            "id": "send-telegram",
+            "name": "Send Response",
+            "type": "n8n-nodes-base.httpRequest",
+            "position": [650, 300]
+      },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={\"ok\": true}",
+                            "options": {}
+                  },
+                  "id": "telegram-respond",
+                  "name": "Respond OK",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [850, 300]
+          }
+    ],
+    "connections": {
+          "Telegram Webhook": { "main": [[{ "node": "Process Command", "type": "main", "index": 0 }]] },
+          "Process Command": { "main": [[{ "node": "Send Response", "type": "main", "index": 0 }]] },
+          "Send Response": { "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-TELEGRAM" }]
+}
