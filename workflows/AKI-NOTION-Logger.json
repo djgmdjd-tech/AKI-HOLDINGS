@@ -1,0 +1,45 @@
+{
+    "name": "AKI-NOTION-Logger",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "POST",
+                            "path": "aki-log",
+        "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "log-webhook",
+                  "name": "Log Request",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-log"
+          },
+          {
+                  "parameters": {
+                            "jsCode": "const request = $input.first().json.body || $input.first().json;\n\nconst logEntry = {\n  id: `LOG-${Date.now().toString(36).toUpperCase()}`,\n  timestamp: new Date().toISOString(),\n  level: request.level || 'INFO',\n  source: request.source || 'SYSTEM',\n  agent: request.agent || null,\n  category: request.category || 'general',\n  message: request.message || '',\n  details: request.details || {},\n  tags: request.tags || []\n};\n\nconst logStore = $getWorkflowStaticData('global');\nif (!logStore.logs) logStore.logs = [];\n\nlogStore.logs.push(logEntry);\n\nif (logStore.logs.length > 1000) {\n  logStore.logs = logStore.logs.slice(-1000);\n}\n\nconst notionPayload = {\n  parent: { database_id: 'YOUR_NOTION_DATABASE_ID' },\n  properties: {\n    'Name': { title: [{ text: { content: logEntry.message.substring(0, 100) } }] },\n    'Log ID': { rich_text: [{ text: { content: logEntry.id } }] },\n    'Level': { select: { name: logEntry.level } },\n    'Source': { select: { name: logEntry.source } },\n    'Agent': { rich_text: [{ text: { content: logEntry.agent || 'N/A' } }] },\n    'Category': { select: { name: logEntry.category } },\n    'Timestamp': { date: { start: logEntry.timestamp } },\n    'Details': { rich_text: [{ text: { content: JSON.stringify(logEntry.details).substring(0, 2000) } }] }\n  }\n};\n\nreturn [{ \n  json: { \n    success: true, \n    log_id: logEntry.id, \n    stored_locally: true,\n    notion_payload: notionPayload,\n    total_logs: logStore.logs.length\n  } \n}];"
+                  },
+                  "id": "log-processor",
+                  "name": "Process Log",
+                  "type": "n8n-nodes-base.code",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "log-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Log Request": { "main": [[{ "node": "Process Log", "type": "main", "index": 0 }]] },
+          "Process Log": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-NOTION" }, { "name": "AKI-LOGGING" }]
+}
