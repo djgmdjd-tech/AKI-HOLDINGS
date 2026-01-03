@@ -1,0 +1,50 @@
+{
+    "name": "AKI-TELEGRAM-SetWebhook",
+    "nodes": [
+          {
+                  "parameters": {
+                            "httpMethod": "GET",
+                            "path": "aki-telegram-setup",
+                            "responseMode": "responseNode",
+                            "options": {}
+                  },
+                  "id": "setup-webhook",
+                  "name": "Setup Trigger",
+                  "type": "n8n-nodes-base.webhook",
+                  "position": [250, 300],
+                  "webhookId": "aki-telegram-setup"
+          },
+          {
+                  "parameters": {
+                            "method": "POST",
+                            "url": "=https://api.telegram.org/bot{{ $vars.TELEGRAM_BOT_TOKEN }}/setWebhook",
+                            "sendBody": true,
+                            "specifyBody": "json",
+                            "jsonBody": "={\n  \"url\": \"{{ $vars.N8N_WEBHOOK_BASE_URL }}/webhook/aki-telegram-webhook\",\n  \"allowed_updates\": [\"message\", \"callback_query\"]\n}",
+                            "options": {}
+                  },
+                  "id": "set-webhook",
+                  "name": "Set Telegram Webhook",
+                  "type": "n8n-nodes-base.httpRequest",
+                  "position": [450, 300]
+          },
+          {
+                  "parameters": {
+                            "respondWith": "json",
+                            "responseBody": "={{ JSON.stringify($json) }}",
+                            "options": {}
+                  },
+                  "id": "setup-respond",
+                  "name": "Respond",
+                  "type": "n8n-nodes-base.respondToWebhook",
+                  "position": [650, 300]
+          }
+    ],
+    "connections": {
+          "Setup Trigger": { "main": [[{ "node": "Set Telegram Webhook", "type": "main", "index": 0 }]] },
+          "Set Telegram Webhook": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+    },
+    "active": false,
+    "settings": { "executionOrder": "v1" },
+    "tags": [{ "name": "AKI-TELEGRAM" }, { "name": "AKI-SETUP" }]
+}
